@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { createSupabaseServerClient } from "@/lib/supabase/server-client";
 import { db } from "@/lib/db";
 import { bookings, chargers, users } from "@/lib/schema";
-import { eq } from "drizzle-orm";
+import { eq, desc } from "drizzle-orm";
 
 // ── GET /api/bookings/host ──
 // Retrieve bookings requested on chargers listed by the signed-in host.
@@ -37,7 +37,7 @@ export async function GET(request: Request) {
       .innerJoin(chargers, eq(bookings.chargerId, chargers.id))
       .innerJoin(users, eq(bookings.driverId, users.id))
       .where(eq(chargers.hostId, user.id))
-      .orderBy(bookings.createdAt);
+      .orderBy(desc(bookings.createdAt));
 
     return NextResponse.json({ bookings: hostBookings }, { status: 200 });
   } catch (error) {

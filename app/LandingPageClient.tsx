@@ -217,8 +217,11 @@ export default function LandingPageClient({ initialUser }: LandingPageProps) {
         body: JSON.stringify({ chargerId }),
       });
       const data = await res.json();
+      console.debug("handleRequestBooking response", res.status, data);
       if (!res.ok) {
         setBookingError(data.error || "Failed to request booking.");
+        // show immediate alert for debugging
+        alert("Booking failed: " + (data.error || res.statusText));
         if (data.bookingId) {
           router.push(`/booking/${data.bookingId}`);
         }
@@ -228,6 +231,7 @@ export default function LandingPageClient({ initialUser }: LandingPageProps) {
     } catch (err) {
       console.error("Booking error:", err);
       setBookingError("Network error. Please try again.");
+      alert("Network error while creating booking: " + String(err));
     } finally {
       setBookingLoaderId("");
     }

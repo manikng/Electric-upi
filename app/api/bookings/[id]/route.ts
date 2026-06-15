@@ -3,6 +3,7 @@ import { createSupabaseServerClient } from "@/lib/supabase/server-client";
 import { db } from "@/lib/db";
 import { bookings, chargers, users } from "@/lib/schema";
 import { eq } from "drizzle-orm";
+import { aliasedTable } from "drizzle-orm";
 
 // ── GET /api/bookings/[id] ──
 // Retrieve detailed information about a booking.
@@ -24,18 +25,29 @@ export async function GET(
       return NextResponse.json({ error: "Unauthorized. Please sign in." }, { status: 401 });
     }
 
-    // 2. Fetch booking joined with charger and driver details
+    // 2. Fetch booking joined with charger + driver + host in a single query.
+    //    Alias the users table twice: once for driver, once for host.
+    const driverUsers = aliasedTable(users, "driver_users");
+    const hostUsers = aliasedTable(users, "host_users");
+
     const [bookingDetails] = await db
       .select({
         bookingId: bookings.id,
         status: bookings.status,
+        // New OTP fields
         secretCode: bookings.secretCode,
         codeExpiresAt: bookings.codeExpiresAt,
         codeUsed: bookings.codeUsed,
+        // Legacy nonce fields — old rows stored verification code here
+        nonce: bookings.nonce,
+        nonceExpiresAt: bookings.nonceExpiresAt,
+        nonceUsed: bookings.nonceUsed,
+        // Timestamps and billing
         createdAt: bookings.createdAt,
         startedAt: bookings.startedAt,
         endedAt: bookings.endedAt,
         energyKwh: bookings.energyKwh,
+        // Charger info
         chargerId: chargers.id,
         title: chargers.title,
         address: chargers.address,
@@ -43,14 +55,20 @@ export async function GET(
         pricePerKwh: chargers.pricePerKwh,
         chargerType: chargers.chargerType,
         plugType: chargers.plugType,
+        // Ownership
         hostId: chargers.hostId,
         driverId: bookings.driverId,
-        driverEmail: users.email,
-        driverName: users.fullName,
+        // Driver info (aliased join)
+        driverEmail: driverUsers.email,
+        driverName: driverUsers.fullName,
+        // Host info (aliased join — no extra query needed)
+        hostEmail: hostUsers.email,
+        hostName: hostUsers.fullName,
       })
       .from(bookings)
       .innerJoin(chargers, eq(bookings.chargerId, chargers.id))
-      .innerJoin(users, eq(bookings.driverId, users.id))
+      .innerJoin(driverUsers, eq(bookings.driverId, driverUsers.id))
+      .innerJoin(hostUsers, eq(chargers.hostId, hostUsers.id))
       .where(eq(bookings.id, id))
       .limit(1);
 
@@ -58,7 +76,7 @@ export async function GET(
       return NextResponse.json({ error: "Booking not found." }, { status: 404 });
     }
 
-    // 3. Authorization Guard: caller must be driver or host
+    // 3. Authorization Guard
     const isDriver = bookingDetails.driverId === user.id;
     const isHost = bookingDetails.hostId === user.id;
 
@@ -66,37 +84,30 @@ export async function GET(
       return NextResponse.json({ error: "Forbidden. You are not a party to this booking." }, { status: 403 });
     }
 
-    // Fetch host email/name separately to show driver
-    let hostName = "Verified Host";
-    let hostEmail = "";
-    if (bookingDetails.hostId) {
-      const [host] = await db
-        .select({ fullName: users.fullName, email: users.email })
-        .from(users)
-        .where(eq(users.id, bookingDetails.hostId))
-        .limit(1);
-      if (host) {
-        hostName = host.fullName || "Verified Host";
-        hostEmail = host.email;
-      }
-    }
+    // 4. Normalize: old rows used nonce+awaiting_handshake, new rows use secretCode+awaiting_driver_arrival.
+    //    Both represent the same business concept. Normalize during reads so frontend never sees the split.
+    const effectiveCode = bookingDetails.secretCode ?? bookingDetails.nonce;
+    const effectiveExpiry = bookingDetails.codeExpiresAt ?? bookingDetails.nonceExpiresAt;
+    const effectiveUsed = bookingDetails.codeUsed || bookingDetails.nonceUsed || false;
+    const effectiveStatus =
+      bookingDetails.status === "awaiting_handshake"
+        ? "awaiting_driver_arrival"
+        : bookingDetails.status;
 
-    // Calculate approximate cost if energy metrics exist
+    // 5. Calculate cost if energy metrics exist
     const price = parseFloat(bookingDetails.pricePerKwh);
     const energy = bookingDetails.energyKwh ? parseFloat(bookingDetails.energyKwh) : 0;
     const cost = price * energy;
 
-    // Invariant protection: only the driver can view the raw secret OTP on this GET route
-    // (the host must obtain it verbally from the driver and enter it to verify).
-    const sanitizedSecretCode = isDriver ? bookingDetails.secretCode : null;
-
+    // 6. Return flat shape — same keys all frontend consumers already reference.
+    //    Driver receives the code; host receives null (they enter it manually, not read from API).
     return NextResponse.json({
       booking: {
         id: bookingDetails.bookingId,
-        status: bookingDetails.status,
-        secretCode: sanitizedSecretCode,
-        codeExpiresAt: bookingDetails.codeExpiresAt,
-        codeUsed: bookingDetails.codeUsed,
+        status: effectiveStatus,
+        secretCode: isDriver ? effectiveCode : null,
+        codeExpiresAt: effectiveExpiry,
+        codeUsed: effectiveUsed,
         createdAt: bookingDetails.createdAt,
         startedAt: bookingDetails.startedAt,
         endedAt: bookingDetails.endedAt,
@@ -114,12 +125,12 @@ export async function GET(
         driver: {
           id: bookingDetails.driverId,
           name: bookingDetails.driverName || "EV Driver",
-          email: isHost ? bookingDetails.driverEmail : null, // Host gets driver email for coordination
+          email: isHost ? bookingDetails.driverEmail : null,
         },
         host: {
           id: bookingDetails.hostId,
-          name: hostName,
-          email: isDriver ? hostEmail : null, // Driver gets host email for coordination
+          name: bookingDetails.hostName || "Verified Host",
+          email: isDriver ? bookingDetails.hostEmail : null,
         },
       },
     }, { status: 200 });
@@ -128,3 +139,4 @@ export async function GET(
     return NextResponse.json({ error: "Internal server error" }, { status: 500 });
   }
 }
+

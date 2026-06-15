@@ -55,26 +55,24 @@ export async function POST(
       );
     }
 
-    // 5. Generate secure 6-digit OTP and expiration (15 minutes from now)
-    // Rule: MUST use crypto.randomInt (no Math.random)
-    const otpCode = crypto.randomInt(100000, 1000000).toString(); // generates between 100000 and 999999
-    const expiry = new Date(Date.now() + 15 * 60 * 1000); // 15 mins
-
-    // 6. Update booking details
+    // 5. Update booking to await driver arrival. Do NOT generate any code here.
     await db
       .update(bookings)
       .set({
         status: "awaiting_driver_arrival",
-        secretCode: otpCode,
-        codeExpiresAt: expiry,
-        codeUsed: false,
       })
-      .where(eq(bookings.id, id));
+      .where(and(eq(bookings.id, id), eq(bookings.status, "pending_host_accept")));
+
+    // verify update affected a row
+    const [updatedBooking] = await db.select().from(bookings).where(eq(bookings.id, id)).limit(1);
+    if (!updatedBooking || updatedBooking.status !== "awaiting_driver_arrival") {
+      return NextResponse.json({ error: "Failed to accept booking (state changed)." }, { status: 409 });
+    }
 
     return NextResponse.json({
       success: true,
       status: "awaiting_driver_arrival",
-      message: "Booking request accepted. Awaiting driver arrival code verification.",
+      message: "Booking accepted. Driver should generate verification code upon arrival.",
     }, { status: 200 });
   } catch (error) {
     console.error("POST /api/bookings/[id]/accept error:", error);

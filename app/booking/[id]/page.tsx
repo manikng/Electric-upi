@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import { getSupabaseBrowserClient } from "@/lib/supabase/browser-client";
@@ -125,6 +125,12 @@ const S = {
     boxShadow: "0 4px 12px rgba(26,107,74,0.15)",
     transition: "opacity 150ms ease",
   } as React.CSSProperties,
+  input: {
+    padding: "12px 14px",
+    borderRadius: "10px",
+    border: "1px solid #0e0a01ff",
+    fontSize: "14px",
+  } as React.CSSProperties,
 };
 
 export default function BookingDetailPage() {
@@ -139,6 +145,12 @@ export default function BookingDetailPage() {
   const [actionLoading, setActionLoading] = useState(false);
   const [paymentSuccess, setPaymentSuccess] = useState(false);
   const [upiPin, setUpiPin] = useState("");
+  // showCode: true for 3.5s after code is generated, then auto-hides.
+  // If driver clicks again after it hides, we know the timer is fresh (not stale).
+  const [showCode, setShowCode] = useState(false);
+  // Duration selector shown after host verifies arrival
+  const [selectedDuration, setSelectedDuration] = useState<number | null>(null);
+  const showCodeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const supabase = getSupabaseBrowserClient();
 
@@ -155,15 +167,7 @@ export default function BookingDetailPage() {
     checkAuth();
   }, []);
 
-  // Poll status endpoint every 3 seconds to keep UI in sync with host verification
-  useEffect(() => {
-    if (!id || !user) return;
-    const interval = setInterval(() => {
-      fetchBookingStatus();
-    }, 3000);
-    return () => clearInterval(interval);
-  }, [id, user]);
-
+  
   async function fetchBookingDetails() {
     setLoading(true);
     try {
@@ -182,47 +186,38 @@ export default function BookingDetailPage() {
     }
   }
 
-  async function fetchBookingStatus() {
-    try {
-      const res = await fetch(`/api/bookings/${id}/status`);
-      if (res.ok) {
-        const data = await res.json();
-        // If the status has changed, trigger a full refresh to get updated model relations
-        setBooking((prev: any) => {
-          if (prev && prev.status !== data.status) {
-            fetchBookingDetails();
-          }
-          return prev ? { ...prev, status: data.status, secretCode: data.secretCode || prev.secretCode } : null;
-        });
-      }
-    } catch (err) {
-      console.warn("Polling error:", err);
+ 
+const handleGenerateCode = async () => {
+  setActionLoading(true);
+  setError("");
+  // Clear any existing auto-hide timer
+  if (showCodeTimer.current) clearTimeout(showCodeTimer.current);
+
+  try {
+    const res = await fetch(`/api/bookings/${id}/generate-code`, {
+      method: "POST",
+    });
+
+    const data = await res.json();
+
+    if (!res.ok) {
+      setError(data.error || "Failed to generate code.");
+      return;
     }
+
+    await fetchBookingDetails();
+    // Show code for 3.5 seconds then auto-hide
+    setShowCode(true);
+    showCodeTimer.current = setTimeout(() => {
+      setShowCode(false);
+    }, 3500);
+  } catch (err) {
+    console.error(err);
+    setError("Network error.");
+  } finally {
+    setActionLoading(false);
   }
-
-  const handleRegenerateCode = async () => {
-    setActionLoading(true);
-    setError("");
-    try {
-      const res = await fetch(`/api/bookings/${id}/regenerate-code`, { method: "POST" });
-      const data = await res.json();
-      if (!res.ok) {
-        setError(data.error || "Failed to regenerate code.");
-      } else {
-        setBooking((prev: any) => ({
-          ...prev,
-          secretCode: data.secretCode,
-          codeExpiresAt: data.codeExpiresAt,
-        }));
-      }
-    } catch (err) {
-      console.error(err);
-      setError("Network error.");
-    } finally {
-      setActionLoading(false);
-    }
-  };
-
+};
   const handleStartCharging = async () => {
     setActionLoading(true);
     try {
@@ -342,30 +337,75 @@ export default function BookingDetailPage() {
           {booking.status === "awaiting_driver_arrival" && (
             <div style={S.otpBox}>
               <h4 style={{ fontSize: "16px", fontWeight: 700, margin: 0, color: "#1a1916" }}>
-                Arrival Verification Code
+                Arrival Verification
               </h4>
-              <p style={{ fontSize: "12px", color: "#6e6b63", margin: 0 }}>
-                Tell this code to the host <strong>{booking.host.name}</strong> upon arrival. Do not share it beforehand.
+              <p style={{ fontSize: "12px", color: "#6e6b63", margin: "8px 0 0 0" }}>
+                {!booking.secretCode
+                  ? "Click the button when you reach the host location."
+                  : showCode
+                  ? "Share this code with the host. It disappears in a few seconds."
+                  : "Code hidden. Click \"Show Code\" to display it again."}
               </p>
-              <div style={S.otpCode}>{booking.secretCode || "------"}</div>
-              <div style={{ fontSize: "12px", color: "#6e6b63" }}>
-                Expires in: <span style={{ fontWeight: 700 }}>15 minutes</span>
+
+              {/* Code display — visible only during the 3.5s auto-show window */}
+              {booking.secretCode && showCode && (
+                <div style={{ marginTop: "16px", display: "flex", flexDirection: "column", alignItems: "center", gap: 8 }}>
+                  <div style={S.otpCode}>{booking.secretCode}</div>
+                  <div style={{ fontSize: "12px", color: "#6e6b63" }}>
+                    Valid until: <span style={{ fontWeight: 700 }}>{booking.codeExpiresAt ? new Date(booking.codeExpiresAt).toLocaleTimeString() : "-"}</span>
+                  </div>
+                </div>
+              )}
+
+              <div style={{ marginTop: "16px", display: "flex", gap: "8px", flexWrap: "wrap" }}>
+                {!booking.secretCode ? (
+                  <button
+                    onClick={handleGenerateCode}
+                    disabled={actionLoading}
+                    style={{
+                      ...S.btn,
+                      background: "linear-gradient(135deg, #1a6b4a, #22914f)",
+                      color: "white",
+                      flex: 1,
+                      opacity: actionLoading ? 0.7 : 1,
+                    }}
+                  >
+                    Click on Arrival
+                  </button>
+                ) : showCode ? (
+                  <button
+                    onClick={handleGenerateCode}
+                    disabled={actionLoading}
+                    style={{
+                      ...S.btn,
+                      background: "white",
+                      border: "1.5px solid #d1cdc3",
+                      color: "#1a1916",
+                      boxShadow: "none",
+                      flex: 1,
+                      opacity: actionLoading ? 0.7 : 1,
+                    }}
+                  >
+                    Regenerate Code
+                  </button>
+                ) : (
+                  <button
+                    onClick={() => {
+                      if (showCodeTimer.current) clearTimeout(showCodeTimer.current);
+                      setShowCode(true);
+                      showCodeTimer.current = setTimeout(() => setShowCode(false), 3500);
+                    }}
+                    style={{
+                      ...S.btn,
+                      background: "linear-gradient(135deg, #1a6b4a, #22914f)",
+                      color: "white",
+                      flex: 1,
+                    }}
+                  >
+                    Show Code
+                  </button>
+                )}
               </div>
-              <button
-                onClick={handleRegenerateCode}
-                disabled={actionLoading}
-                style={{
-                  ...S.btn,
-                  background: "white",
-                  border: "1.5px solid #d1cdc3",
-                  color: "#1a1916",
-                  boxShadow: "none",
-                  marginTop: "8px",
-                  opacity: actionLoading ? 0.7 : 1
-                }}
-              >
-                Regenerate Code
-              </button>
             </div>
           )}
 
@@ -375,9 +415,46 @@ export default function BookingDetailPage() {
               <div>
                 <h4 style={{ fontSize: "17px", fontWeight: 700, margin: 0 }}>Arrival Verified!</h4>
                 <p style={{ fontSize: "13px", color: "#6e6b63", marginTop: "6px" }}>
-                  Connect the charger cable to your EV. Tap below to start the charging session.
+                  Select your charging duration. Your estimated cost will be shown below.
                 </p>
               </div>
+
+              {/* Duration selector */}
+              <div style={{ display: "flex", gap: "8px", flexWrap: "wrap", justifyContent: "center" }}>
+                {[
+                  { label: "10 min", minutes: 10 },
+                  { label: "15 min", minutes: 15 },
+                  { label: "30 min", minutes: 30 },
+                  { label: "1 hr",   minutes: 60 },
+                  { label: "2 hr",   minutes: 120 },
+                ].map(({ label, minutes }) => (
+                  <button
+                    key={minutes}
+                    onClick={() => setSelectedDuration(minutes)}
+                    style={{
+                      padding: "8px 16px",
+                      borderRadius: "9999px",
+                      border: selectedDuration === minutes ? "2px solid #1a6b4a" : "1.5px solid #d1cdc3",
+                      background: selectedDuration === minutes ? "#f0fdf4" : "white",
+                      color: selectedDuration === minutes ? "#1a6b4a" : "#1a1916",
+                      fontWeight: 600,
+                      fontSize: "13px",
+                      cursor: "pointer",
+                    }}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+
+              {/* Estimated cost — frontend only, no backend billing */}
+              {selectedDuration !== null && (
+                <div style={{ background: "#f0fdf4", border: "1.5px solid #bbf7d0", borderRadius: "12px", padding: "12px 20px", fontSize: "14px", color: "#15803d", fontWeight: 600 }}>
+                  Estimated cost: ₹{((selectedDuration / 60) * booking.charger.pricePerKwh).toFixed(2)}
+                  <span style={{ fontWeight: 400, color: "#6e6b63", fontSize: "12px", marginLeft: "6px" }}>(for {selectedDuration} min)</span>
+                </div>
+              )}
+
               <button
                 onClick={handleStartCharging}
                 disabled={actionLoading}

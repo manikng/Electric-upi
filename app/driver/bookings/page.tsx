@@ -1,13 +1,5 @@
 "use client";
 
-import { useState, useEffect } from "react";
-import { useRouter } from "next/navigation";
-import Link from "next/link";
-import { getSupabaseBrowserClient } from "@/lib/supabase/browser-client";
-import { User } from "@supabase/supabase-js";
-import { Zap, Clock, CheckCircle2, ArrowLeft, RefreshCw, Eye } from "lucide-react";
-
-// Warm premium style mapping
 const S = {
   page: {
     minHeight: "100vh",
@@ -152,6 +144,15 @@ const S = {
   } as React.CSSProperties,
 };
 
+import { useState, useEffect } from "react";
+import { useRouter } from "next/navigation";
+import Link from "next/link";
+import { getSupabaseBrowserClient } from "@/lib/supabase/browser-client";
+import { User } from "@supabase/supabase-js";
+import { Zap, Clock, CheckCircle2, ArrowLeft, RefreshCw, Eye } from "lucide-react";
+// app/driver/bookings/page.tsx
+// Warm premium style mapping
+
 export default function DriverBookingsPage() {
   const router = useRouter();
   const [user, setUser] = useState<User | null>(null);
@@ -254,9 +255,11 @@ export default function DriverBookingsPage() {
           </div>
         ) : (
           bookingsList.map((booking) => {
+            // Only calculate cost for completed sessions with real energy data
+            const isCompleted = booking.status === "completed" && booking.energyKwh;
             const price = parseFloat(booking.pricePerKwh);
-            const energy = booking.energyKwh ? parseFloat(booking.energyKwh) : 10.5;
-            const cost = price * energy;
+            const energy = isCompleted ? parseFloat(booking.energyKwh) : null;
+            const cost = isCompleted ? price * energy! : null;
 
             return (
               <div key={booking.id} style={S.card}>
@@ -272,9 +275,9 @@ export default function DriverBookingsPage() {
 
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "12px", borderTop: "1px solid #f0ede6", paddingTop: "14px" }}>
                   <div>
-                    {booking.status === "completed" ? (
+                    {isCompleted ? (
                       <span style={{ fontSize: "13px", color: "#6e6b63" }}>
-                        Charged <strong>{energy} kWh</strong> for <strong>₹{cost.toFixed(2)}</strong> on {new Date(booking.createdAt).toLocaleDateString()}
+                        Charged <strong>{energy} kWh</strong> for <strong>₹{cost!.toFixed(2)}</strong> on {new Date(booking.createdAt).toLocaleDateString()}
                       </span>
                     ) : (
                       <span style={{ fontSize: "13px", color: "#6e6b63" }}>

@@ -7,6 +7,24 @@ import { getSupabaseBrowserClient } from "@/lib/supabase/browser-client";
 import { User } from "@supabase/supabase-js";
 import { Zap, Clock, CheckCircle2, ShieldAlert, ArrowLeft, RefreshCw } from "lucide-react";
 
+const COLORS = {
+  bg: "#f7f5f0",
+  card: "#ffffff",
+
+  primary: "#1a6b4a",
+  primaryDark: "#145238",
+
+  border: "#e2dfd8",
+
+  text: "#1a1916",
+  muted: "#6e6b63",
+
+  successBg: "#eef6f1",
+  successBorder: "#c9ddd2",
+
+  warningBg: "#f8f3e7",
+  warningBorder: "#eadfc4",
+};
 // Warm grounded styling inline (avoid Tailwind Preflight conflicts)
 const S = {
   page: {
@@ -74,7 +92,7 @@ const S = {
   } as React.CSSProperties,
 
   container: {
-    maxWidth: "800px",
+    maxWidth: "720px",
     margin: "0 auto",
     padding: "40px 24px",
   } as React.CSSProperties,
@@ -109,19 +127,19 @@ const S = {
 
   badge: (status: string) => {
     let bg = "#e2dfd8";
-    let color = "#6e6b63";
+    let color = "#0d0c0bff";
     if (status === "pending_host_accept") {
       bg = "#fef3c7";
       color = "#b45309";
     } else if (status === "awaiting_driver_arrival") {
-      bg = "#dbeafe";
-      color = "#1d4ed8";
+      bg = "#f8f3e7";
+      color = "#8b6a2f";
     } else if (status === "verified" || status === "charging") {
-      bg = "#dcfce7";
-      color = "#15803d";
+      bg = "#eef6f1";
+      color = "#1a6b4a";
     } else if (status === "completed") {
-      bg = "#f3f4f6";
-      color = "#374151";
+      bg = "#eef6f1";
+      color = "#1a6b4a";
     }
     return {
       background: bg,
@@ -192,14 +210,7 @@ export default function HostBookingsPage() {
     checkAuth();
   }, []);
 
-  // Poll status every 5 seconds to reflect driver's real-time transitions (e.g. driver ended)
-  useEffect(() => {
-    if (!user) return;
-    const interval = setInterval(() => {
-      fetchHostBookings(false);
-    }, 5000);
-    return () => clearInterval(interval);
-  }, [user]);
+
 
   async function fetchHostBookings(showLoader = true) {
     if (showLoader) setLoading(true);
@@ -232,7 +243,7 @@ export default function HostBookingsPage() {
       if (!res.ok) {
         setError(data.error || "Failed to accept booking.");
       } else {
-        setSuccessMsg("Booking accepted! OTP has been generated.");
+        setSuccessMsg("Booking accepted! Waiting for driver to arrive.");
         fetchHostBookings(false);
       }
     } catch (err) {
@@ -279,16 +290,19 @@ export default function HostBookingsPage() {
   const handleStartCharging = async (bookingId: string) => {
     setActionLoadingId(bookingId);
     setError("");
+    setSuccessMsg("");
     try {
       const res = await fetch(`/api/bookings/${bookingId}/start`, { method: "POST" });
       const data = await res.json();
       if (!res.ok) {
-        setError(data.error || "Failed to start charging.");
+        setError(data.error || "Failed to start charging session.");
       } else {
+        setSuccessMsg("Charging session started!");
         fetchHostBookings(false);
       }
     } catch (err) {
       console.error(err);
+      setError("Failed to communicate with the server.");
     } finally {
       setActionLoadingId("");
     }
@@ -297,16 +311,19 @@ export default function HostBookingsPage() {
   const handleEndCharging = async (bookingId: string) => {
     setActionLoadingId(bookingId);
     setError("");
+    setSuccessMsg("");
     try {
       const res = await fetch(`/api/bookings/${bookingId}/end`, { method: "POST" });
       const data = await res.json();
       if (!res.ok) {
-        setError(data.error || "Failed to end charging.");
+        setError(data.error || "Failed to end charging session.");
       } else {
+        setSuccessMsg(`Session complete! Energy: ${data.energyKwh} kWh · Cost: ₹${data.cost}`);
         fetchHostBookings(false);
       }
     } catch (err) {
       console.error(err);
+      setError("Failed to communicate with the server.");
     } finally {
       setActionLoadingId("");
     }
@@ -391,42 +408,43 @@ export default function HostBookingsPage() {
               </div>
 
               {/* Status Specific Info */}
-              {booking.status === "awaiting_driver_arrival" && (
-                <div style={{ background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: "10px", padding: "12px 16px", display: "flex", flexWrap: "wrap", gap: "12px", alignItems: "center", justifyContent: "space-between" }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                    <Clock className="w-4 h-4 text-blue-600 animate-pulse" />
-                    <span style={{ fontSize: "13px", color: "#334155", fontWeight: 600 }}>Driver is arriving. Enter their 6-digit code:</span>
+              {(booking.status === "awaiting_driver_arrival" || booking.status === "awaiting_handshake")
+                && (
+                  <div style={{ background: "#f8f3e7", border: "1px solid #eadfc4", borderRadius: "10px", padding: "12px 16px", display: "flex", flexWrap: "wrap", gap: "12px", alignItems: "center", justifyContent: "space-between" }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                      <Clock className="w-4 h-4 text-blue-600 animate-pulse" />
+                      <span style={{ fontSize: "13px", color: "#8b6a2f", fontWeight: 600 }}>Driver is arriving. Enter their 6-digit code:</span>
+                    </div>
+                    <div style={{ display: "flex", gap: "8px" }}>
+                      <input
+                        type="text"
+                        maxLength={6}
+                        placeholder="000000"
+                        value={otpInputs[booking.id] || ""}
+                        onChange={(e) => setOtpInputs(prev => ({ ...prev, [booking.id]: e.target.value.replace(/\D/g, "") }))}
+                        style={S.input}
+                      />
+                      <button
+                        onClick={() => handleVerifyOtp(booking.id)}
+                        disabled={actionLoadingId !== ""}
+                        style={{
+                          ...S.btn,
+                          background: "#1d4ed8",
+                          color: "white",
+                          opacity: actionLoadingId !== "" ? 0.7 : 1
+                        }}
+                      >
+                        Verify
+                      </button>
+                    </div>
                   </div>
-                  <div style={{ display: "flex", gap: "8px" }}>
-                    <input
-                      type="text"
-                      maxLength={6}
-                      placeholder="000000"
-                      value={otpInputs[booking.id] || ""}
-                      onChange={(e) => setOtpInputs(prev => ({ ...prev, [booking.id]: e.target.value.replace(/\D/g, "") }))}
-                      style={S.input}
-                    />
-                    <button
-                      onClick={() => handleVerifyOtp(booking.id)}
-                      disabled={actionLoadingId !== ""}
-                      style={{
-                        ...S.btn,
-                        background: "#1d4ed8",
-                        color: "white",
-                        opacity: actionLoadingId !== "" ? 0.7 : 1
-                      }}
-                    >
-                      Verify
-                    </button>
-                  </div>
-                </div>
-              )}
+                )}
 
               {booking.status === "verified" && (
-                <div style={{ background: "#f0fdf4", border: "1px solid #bbf7d0", borderRadius: "10px", padding: "12px 16px", display: "flex", flexWrap: "wrap", gap: "12px", alignItems: "center", justifyContent: "space-between" }}>
+                <div style={{ background: "#eef6f1", border: "1px solid #c9ddd2", borderRadius: "10px", padding: "12px 16px", display: "flex", flexWrap: "wrap", gap: "12px", alignItems: "center", justifyContent: "space-between" }}>
                   <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
                     <CheckCircle2 className="w-4 h-4 text-green-600" />
-                    <span style={{ fontSize: "13px", color: "#166534", fontWeight: 600 }}>Driver verified. Plug in vehicle and start charging:</span>
+                    <span style={{ fontSize: "13px", color: "#1a6b4a", fontWeight: 600 }}>Driver verified. Plug in vehicle and start charging:</span>
                   </div>
                   <button
                     onClick={() => handleStartCharging(booking.id)}
@@ -447,7 +465,7 @@ export default function HostBookingsPage() {
                 <div style={{ background: "#fdf2f8", border: "1px solid #fbcfe8", borderRadius: "10px", padding: "12px 16px", display: "flex", flexWrap: "wrap", gap: "12px", alignItems: "center", justifyContent: "space-between" }}>
                   <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
                     <Zap className="w-4 h-4 text-pink-600 animate-bounce" />
-                    <span style={{ fontSize: "13px", color: "#9d174d", fontWeight: 600 }}>Session Active. Charging vehicle...</span>
+                    <span style={{ fontSize: "13px", color: "#145238", fontWeight: 600 }}>Session Active. Charging vehicle...</span>
                   </div>
                   <button
                     onClick={() => handleEndCharging(booking.id)}
@@ -465,7 +483,7 @@ export default function HostBookingsPage() {
               )}
 
               {booking.status === "completed" && (
-                <div style={{ background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: "10px", padding: "12px 16px", fontSize: "13px", color: "#334155" }}>
+                <div style={{ background: "#f4f2ed", border: "1px solid #e2dfd8", borderRadius: "10px", padding: "12px 16px", fontSize: "13px", color: "#4f4a40" }}>
                   Session successfully finished. Completed <strong>{booking.energyKwh || "10.5"} kWh</strong> for <strong>₹{(parseFloat(booking.pricePerKwh) * parseFloat(booking.energyKwh || "10.5")).toFixed(2)}</strong>. UPI payment split complete.
                 </div>
               )}
@@ -478,7 +496,7 @@ export default function HostBookingsPage() {
                     disabled={actionLoadingId !== ""}
                     style={{
                       ...S.btn,
-                      background: "linear-gradient(135deg, #1a6b4a, #22914f)",
+                      background: "linear-gradient(135deg, #edf4ef, #c4d8ca)",
                       color: "white",
                       opacity: actionLoadingId === booking.id ? 0.7 : 1
                     }}

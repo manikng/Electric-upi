@@ -44,9 +44,18 @@ export const bookings = pgTable("bookings", {
   driverId: uuid("driver_id").references(() => users.id, { onDelete: "cascade" }).notNull(),
   status: text("status").default("pending_host_accept"),
   // pending_host_accept → awaiting_driver_arrival → verified → charging → completed
+  // legacy secretCode fields (kept for backward compatibility)
   secretCode: text("secret_code"),
   codeExpiresAt: timestamp("code_expires_at", { withTimezone: true }),
   codeUsed: boolean("code_used").default(false),
+  // Mutual nonce handshake fields
+  nonce: text("nonce"),
+  nonceExpiresAt: timestamp("nonce_expires_at", { withTimezone: true }),
+  nonceUsed: boolean("nonce_used").default(false),
+  hostConfirmed: boolean("host_confirmed").default(false),
+  driverConfirmed: boolean("driver_confirmed").default(false),
+  nonceGeneratedAt: timestamp("nonce_generated_at", { withTimezone: true }),
+  nonceGeneratedBy: uuid("nonce_generated_by").references(() => users.id),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
   startedAt: timestamp("started_at", { withTimezone: true }),
   endedAt: timestamp("ended_at", { withTimezone: true }),

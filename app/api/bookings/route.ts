@@ -48,9 +48,11 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "You cannot book your own charger." }, { status: 400 });
     }
 
-    // Adversarial: Driver already has an active booking that is not completed
+    // Adversarial: Driver already has an active booking that is not completed.
+    // Select only minimal fields to avoid referencing newer columns that may
+    // not exist in older databases.
     const existingActiveBookings = await db
-      .select()
+      .select({ id: bookings.id, status: bookings.status })
       .from(bookings)
       .where(
         and(
