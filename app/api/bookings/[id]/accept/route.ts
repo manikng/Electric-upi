@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { createSupabaseServerClient } from "@/lib/supabase/server-client";
 import { db } from "@/lib/db";
 import { bookings, chargers } from "@/lib/schema";
-import { eq, and } from "drizzle-orm";
+import { eq, and, ne } from "drizzle-orm";
 import crypto from "crypto";
 
 // ── POST /api/bookings/[id]/accept ──
@@ -69,10 +69,27 @@ export async function POST(
       return NextResponse.json({ error: "Failed to accept booking (state changed)." }, { status: 409 });
     }
 
+    // 6. Auto-cancel all other pending bookings for the same driver.
+    //    When a host accepts one booking, the driver no longer needs the rest.
+    const driverId = updatedBooking.driverId;
+    await db
+      .update(bookings)
+      .set({
+        status: "cancelled",
+        endedAt: new Date(),
+      })
+      .where(
+        and(
+          eq(bookings.driverId, driverId),
+          eq(bookings.status, "pending_host_accept"),
+          ne(bookings.id, id)
+        )
+      );
+
     return NextResponse.json({
       success: true,
       status: "awaiting_driver_arrival",
-      message: "Booking accepted. Driver should generate verification code upon arrival.",
+      message: "Booking accepted. Other pending bookings for this driver have been cancelled. Driver should generate verification code upon arrival.",
     }, { status: 200 });
   } catch (error) {
     console.error("POST /api/bookings/[id]/accept error:", error);

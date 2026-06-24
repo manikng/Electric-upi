@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { createSupabaseServerClient } from "@/lib/supabase/server-client";
 import { db } from "@/lib/db";
 import { bookings, chargers } from "@/lib/schema";
-import { eq } from "drizzle-orm";
+import { eq, and, inArray } from "drizzle-orm";
 
 // ── POST /api/bookings/[id]/start ──
 // Driver or host triggers the start of charging.
@@ -48,10 +48,10 @@ export async function POST(
       return NextResponse.json({ error: "Forbidden. You are not a party to this booking." }, { status: 403 });
     }
 
-    // 4. Verify booking is verified
-    if (booking.status !== "verified") {
+    // 4. Verify booking is active or verified
+    if (booking.status !== "active" && booking.status !== "verified") {
       return NextResponse.json(
-        { error: `Cannot start charging. Booking status is '${booking.status}' (expected 'verified')` },
+        { error: `Cannot start charging. Booking status is '${booking.status}' (expected 'active')` },
         { status: 400 }
       );
     }
@@ -63,7 +63,18 @@ export async function POST(
         status: "charging",
         startedAt: new Date(),
       })
-      .where(eq(bookings.id, id));
+      .where(
+        and(
+          eq(bookings.id, id),
+          inArray(bookings.status, ["active", "verified"])
+        )
+      );
+
+    // verify update affected a row
+    const [updatedBooking] = await db.select().from(bookings).where(eq(bookings.id, id)).limit(1);
+    if (!updatedBooking || updatedBooking.status !== "charging") {
+      return NextResponse.json({ error: "Failed to start charging (state changed or already active)." }, { status: 409 });
+    }
 
     return NextResponse.json({
       success: true,

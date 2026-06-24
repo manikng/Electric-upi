@@ -134,7 +134,7 @@ const S = {
     } else if (status === "awaiting_driver_arrival") {
       bg = "#f8f3e7";
       color = "#8b6a2f";
-    } else if (status === "verified" || status === "charging") {
+    } else if (status === "verified" || status === "active" || status === "charging") {
       bg = "#eef6f1";
       color = "#1a6b4a";
     } else if (status === "completed") {
@@ -193,7 +193,18 @@ export default function HostBookingsPage() {
   const [error, setError] = useState("");
   const [actionLoadingId, setActionLoadingId] = useState("");
   const [otpInputs, setOtpInputs] = useState<{ [bookingId: string]: string }>({});
+  const [billingKwhInputs, setBillingKwhInputs] = useState<{ [bookingId: string]: string }>({});
   const [successMsg, setSuccessMsg] = useState("");
+
+  function formatSessionDuration(startedAt: string | null, endedAt: string | null): string {
+    if (!startedAt || !endedAt) return "—";
+    const ms = new Date(endedAt).getTime() - new Date(startedAt).getTime();
+    const mins = Math.round(ms / 60000);
+    if (mins < 60) return `${mins} min`;
+    const h = Math.floor(mins / 60);
+    const m = mins % 60;
+    return m > 0 ? `${h} hr ${m} min` : `${h} hr`;
+  }
 
   const supabase = getSupabaseBrowserClient();
 
@@ -318,12 +329,68 @@ export default function HostBookingsPage() {
       if (!res.ok) {
         setError(data.error || "Failed to end charging session.");
       } else {
-        setSuccessMsg(`Session complete! Energy: ${data.energyKwh} kWh · Cost: ₹${data.cost}`);
+        setSuccessMsg(`Session ended. Draft bill: ${data.energyKwh} kWh · ₹${data.cost} — review and finalize.`);
         fetchHostBookings(false);
       }
     } catch (err) {
       console.error(err);
       setError("Failed to communicate with the server.");
+    } finally {
+      setActionLoadingId("");
+    }
+  };
+
+  const handleUpdateBilling = async (bookingId: string, useAuto = false) => {
+    setActionLoadingId(bookingId);
+    setError("");
+    setSuccessMsg("");
+    try {
+      const body = useAuto
+        ? {}
+        : { energyKwh: parseFloat(billingKwhInputs[bookingId] || "") };
+
+      if (!useAuto && (!body.energyKwh || !Number.isFinite(body.energyKwh) || body.energyKwh <= 0)) {
+        setError("Enter a valid kWh override, or use Revert to auto.");
+        setActionLoadingId("");
+        return;
+      }
+
+      const res = await fetch(`/api/bookings/${bookingId}/billing`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setError(data.error || "Failed to update bill.");
+      } else {
+        setSuccessMsg(`Draft updated: ${data.energyKwh} kWh · ₹${data.previewCost}`);
+        fetchHostBookings(false);
+      }
+    } catch (err) {
+      console.error(err);
+      setError("Failed to update billing.");
+    } finally {
+      setActionLoadingId("");
+    }
+  };
+
+  const handleFinalizeBilling = async (bookingId: string) => {
+    setActionLoadingId(bookingId);
+    setError("");
+    setSuccessMsg("");
+    try {
+      const res = await fetch(`/api/bookings/${bookingId}/billing/finalize`, { method: "POST" });
+      const data = await res.json();
+      if (!res.ok) {
+        setError(data.error || "Failed to finalize bill.");
+      } else {
+        setSuccessMsg(`Bill finalized: ₹${data.finalAmount}. Driver can pay now.`);
+        fetchHostBookings(false);
+      }
+    } catch (err) {
+      console.error(err);
+      setError("Failed to finalize billing.");
     } finally {
       setActionLoadingId("");
     }
@@ -440,7 +507,7 @@ export default function HostBookingsPage() {
                   </div>
                 )}
 
-              {booking.status === "verified" && (
+              {(booking.status === "verified" || booking.status === "active") && (
                 <div style={{ background: "#eef6f1", border: "1px solid #c9ddd2", borderRadius: "10px", padding: "12px 16px", display: "flex", flexWrap: "wrap", gap: "12px", alignItems: "center", justifyContent: "space-between" }}>
                   <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
                     <CheckCircle2 className="w-4 h-4 text-green-600" />
@@ -482,9 +549,56 @@ export default function HostBookingsPage() {
                 </div>
               )}
 
-              {booking.status === "completed" && (
+              {booking.status === "completed" && booking.billingStatus === "draft" && (
+                <div style={{ background: "#f8f3e7", border: "1px solid #eadfc4", borderRadius: "10px", padding: "16px", display: "flex", flexDirection: "column", gap: "12px" }}>
+                  <div style={{ fontSize: "13px", fontWeight: 700, color: "#8b6a2f" }}>Review draft bill</div>
+                  <div style={{ fontSize: "12px", color: "#6e6b63", display: "flex", flexDirection: "column", gap: "4px" }}>
+                    <span>Session: {formatSessionDuration(booking.startedAt, booking.endedAt)}</span>
+                    <span>Charger: {booking.powerKw ?? "—"} kW · Rate: ₹{parseFloat(booking.pricePerKwh).toFixed(2)}/kWh</span>
+                    <span>Auto calc: {booking.autoEnergyKwh ?? booking.energyKwh ?? "—"} kWh ({booking.energySource === "manual" ? "manual override" : "auto"})</span>
+                    <span>Preview total: <strong>₹{(booking.previewCost ?? 0).toFixed(2)}</strong></span>
+                  </div>
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: "8px", alignItems: "center" }}>
+                    <label style={{ fontSize: "12px", fontWeight: 600 }}>Override kWh:</label>
+                    <input
+                      type="text"
+                      inputMode="decimal"
+                      placeholder={String(booking.energyKwh ?? "")}
+                      value={billingKwhInputs[booking.id] ?? ""}
+                      onChange={(e) => setBillingKwhInputs((prev) => ({ ...prev, [booking.id]: e.target.value.replace(/[^\d.]/g, "") }))}
+                      style={{ ...S.input, width: "120px" }}
+                    />
+                    <button
+                      onClick={() => handleUpdateBilling(booking.id, false)}
+                      disabled={actionLoadingId !== ""}
+                      style={{ ...S.btn, background: "#1d4ed8", color: "white", opacity: actionLoadingId !== "" ? 0.7 : 1 }}
+                    >
+                      Update bill
+                    </button>
+                    <button
+                      onClick={() => handleUpdateBilling(booking.id, true)}
+                      disabled={actionLoadingId !== ""}
+                      style={{ ...S.btn, background: "white", border: "1.5px solid #d1cdc3", color: "#1a1916", opacity: actionLoadingId !== "" ? 0.7 : 1 }}
+                    >
+                      Revert to auto
+                    </button>
+                    <button
+                      onClick={() => handleFinalizeBilling(booking.id)}
+                      disabled={actionLoadingId !== ""}
+                      style={{ ...S.btn, background: "#16a34a", color: "white", opacity: actionLoadingId !== "" ? 0.7 : 1 }}
+                    >
+                      Finalize bill
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {booking.status === "completed" && booking.billingStatus === "finalized" && (
                 <div style={{ background: "#f4f2ed", border: "1px solid #e2dfd8", borderRadius: "10px", padding: "12px 16px", fontSize: "13px", color: "#4f4a40" }}>
-                  Session successfully finished. Completed <strong>{booking.energyKwh || "10.5"} kWh</strong> for <strong>₹{(parseFloat(booking.pricePerKwh) * parseFloat(booking.energyKwh || "10.5")).toFixed(2)}</strong>. UPI payment split complete.
+                  Bill finalized: <strong>{booking.energyKwh} kWh</strong> · <strong>₹{(booking.finalAmount ?? booking.previewCost ?? 0).toFixed(2)}</strong>.
+                  {booking.isPaid
+                    ? " Payment received."
+                    : " Awaiting driver payment."}
                 </div>
               )}
 

@@ -24,13 +24,16 @@ export async function POST(
     }
 
     // 2. Parse request body
-    const body = await request.json();
+    let body: any;
+    try {
+      body = await request.json();
+    } catch {
+      return NextResponse.json({ error: "Invalid JSON body." }, { status: 400 });
+    }
     const { code } = body;
-
     if (!code) {
       return NextResponse.json({ error: "Missing nonce in request body." }, { status: 400 });
     }
-
     const cleanCode = String(code).trim();
 
     // 3. Fetch booking and parent charger details
@@ -88,11 +91,11 @@ export async function POST(
       return NextResponse.json({ error: "Code has expired. Please ask the driver to generate a new code." }, { status: 400 });
     }
 
-    // 7. Finalize booking: set status=verified, mark both codeUsed and nonceUsed so old rows are
+    // 7. Finalize booking: set status=active, mark both codeUsed and nonceUsed so old rows are
     //    also correctly marked as consumed.
-    await db.update(bookings).set({ status: "verified", codeUsed: true, nonceUsed: true }).where(eq(bookings.id, id));
+    await db.update(bookings).set({ status: "active", codeUsed: true, nonceUsed: true }).where(eq(bookings.id, id));
 
-    return NextResponse.json({ success: true, status: "verified", message: "Driver verified. Booking confirmed." }, { status: 200 });
+    return NextResponse.json({ success: true, status: "active", message: "Driver active. Booking confirmed." }, { status: 200 });
   } catch (error) {
     console.error("POST /api/bookings/[id]/verify-code error:", error);
     return NextResponse.json({ error: "Internal server error" }, { status: 500 });

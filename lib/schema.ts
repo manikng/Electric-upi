@@ -1,4 +1,4 @@
-import { pgTable, uuid, text, decimal, integer, timestamp, boolean } from "drizzle-orm/pg-core";
+import { pgTable, uuid, text, decimal, integer, timestamp, boolean, geometry } from "drizzle-orm/pg-core";
 import { relations, sql } from "drizzle-orm";
 
 // 1. Users Table
@@ -34,6 +34,7 @@ export const chargers = pgTable("chargers", {
   status: text("status").default("pending"),  // pending | active | inactive
   latitude: decimal("latitude", { precision: 10, scale: 7 }),
   longitude: decimal("longitude", { precision: 10, scale: 7 }),
+  location: geometry("location", { type: "point", mode: "xy", srid: 4326 }),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
 });
 
@@ -43,11 +44,13 @@ export const bookings = pgTable("bookings", {
   chargerId: uuid("charger_id").references(() => chargers.id, { onDelete: "cascade" }).notNull(),
   driverId: uuid("driver_id").references(() => users.id, { onDelete: "cascade" }).notNull(),
   status: text("status").default("pending_host_accept"),
-  // pending_host_accept → awaiting_driver_arrival → verified → charging → completed
+  // pending_host_accept → awaiting_driver_arrival → active → charging → completed
   // legacy secretCode fields (kept for backward compatibility)
   secretCode: text("secret_code"),
   codeExpiresAt: timestamp("code_expires_at", { withTimezone: true }),
   codeUsed: boolean("code_used").default(false),
+  // 10-minute hold timer: booking auto-expires if host doesn't accept
+  holdExpiresAt: timestamp("hold_expires_at", { withTimezone: true }),
   // Mutual nonce handshake fields
   nonce: text("nonce"),
   nonceExpiresAt: timestamp("nonce_expires_at", { withTimezone: true }),
@@ -60,6 +63,23 @@ export const bookings = pgTable("bookings", {
   startedAt: timestamp("started_at", { withTimezone: true }),
   endedAt: timestamp("ended_at", { withTimezone: true }),
   energyKwh: decimal("energy_kwh", { precision: 8, scale: 3 }),
+  // Billing (session completed → draft → finalized)
+  billingStatus: text("billing_status").default("draft"), // draft | finalized
+  energySource: text("energy_source"), // auto | manual
+  autoEnergyKwh: decimal("auto_energy_kwh", { precision: 8, scale: 3 }),
+  finalAmount: decimal("final_amount", { precision: 10, scale: 2 }),
+  billingFinalizedAt: timestamp("billing_finalized_at", { withTimezone: true }),
+});
+
+// 4. Payments Table
+export const payments = pgTable("payments", {
+  id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+  bookingId: uuid("booking_id").references(() => bookings.id, { onDelete: "cascade" }).notNull(),
+  amount: decimal("amount", { precision: 10, scale: 2 }).notNull(),
+  status: text("status").default("pending"), // pending | simulated_paid | failed
+  providerRef: text("provider_ref"),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+  paidAt: timestamp("paid_at", { withTimezone: true }),
 });
 
 // Relations for easier queries
@@ -76,7 +96,7 @@ export const chargersRelations = relations(chargers, ({ one, many }) => ({
   bookings: many(bookings),
 }));
 
-export const bookingsRelations = relations(bookings, ({ one }) => ({
+export const bookingsRelations = relations(bookings, ({ one, many }) => ({
   charger: one(chargers, {
     fields: [bookings.chargerId],
     references: [chargers.id],
@@ -84,5 +104,13 @@ export const bookingsRelations = relations(bookings, ({ one }) => ({
   driver: one(users, {
     fields: [bookings.driverId],
     references: [users.id],
+  }),
+  payments: many(payments),
+}));
+
+export const paymentsRelations = relations(payments, ({ one }) => ({
+  booking: one(bookings, {
+    fields: [payments.bookingId],
+    references: [bookings.id],
   }),
 }));

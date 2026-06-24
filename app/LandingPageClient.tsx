@@ -4,33 +4,33 @@ import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { User } from "@supabase/supabase-js";
-import { getSupabaseBrowserClient } from "@/lib/supabase/browser-client";
 import { motion, AnimatePresence } from "framer-motion";
 import {
-  Zap,
   Search,
+  Calendar,
+  Smartphone,
+  Zap,
   Home,
-  Sun,
+  Shield,
   Moon,
-  MapPin,
-  Star,
-  Heart,
+  Sun,
   ChevronLeft,
   ChevronRight,
-  SlidersHorizontal,
-  Shield,
   Circle,
   Square,
   Clock,
-  Layers,
-  Box,
-  Calendar,
-  Smartphone,
-  CheckCircle2,
-  Users,
 } from "lucide-react";
 
+// Custom hooks
+import { useChargers } from "@/hooks/useChargers";
+import { useGeolocation } from "@/hooks/useGeolocation";
+import { useAuth } from "@/hooks/useAuth";
+import { useTheme } from "@/hooks/useTheme";
+import { ChargerResult, SearchResponse } from "@/lib/types";
 
+// Import components
+import FilterBar from "@/components/FilterBar";
+import SearchListings from "@/components/SearchListings";
 
 const HERO_SLIDES = [
   {
@@ -116,126 +116,48 @@ interface LandingPageProps {
 }
 
 export default function LandingPageClient({ initialUser }: LandingPageProps) {
-  const [user, setUser] = useState<User | null>(initialUser);
-  const [theme, setTheme] = useState<"dark" | "light">("dark");
   const [activeCategory, setActiveCategory] = useState("All");
-  const [favorites, setFavorites] = useState<string[]>([]); // Favorite listings
   const [searchQuery, setSearchQuery] = useState("");
   const [filterType, setFilterType] = useState("All Types");
   const [sortOrder, setSortOrder] = useState("Nearest First");
   const [carouselIndex, setCarouselIndex] = useState(0);
   const [currentSlide, setCurrentSlide] = useState(0);
   const [isAutoPlaying, setIsAutoPlaying] = useState(true);
-
-  // DB Data & API states
-  const [dbChargers, setDbChargers] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [locationError, setLocationError] = useState("");
-  const [userCoords, setUserCoords] = useState<{ lat: number; lng: number } | null>(null);
-  const [bookingLoaderId, setBookingLoaderId] = useState("");
-  const [bookingError, setBookingError] = useState("");
+  const [radius, setRadius] = useState(50);
+  const [maxPrice, setMaxPrice] = useState("");
+  const [plugTypes, setPlugTypes] = useState<string[]>([]);
+  const [page, setPage] = useState(1);
 
   const heroCarouselRef = useRef<HTMLDivElement>(null);
   const autoPlayRef = useRef<ReturnType<typeof setInterval> | null>(null);
-
-  const supabase = getSupabaseBrowserClient();
   const router = useRouter();
 
-  // Fetch chargers from DB with geolocation if enabled
-  useEffect(() => {
-    let active = true;
-    async function fetchChargers() {
-      setLoading(true);
-      try {
-        const params = new URLSearchParams();
-        if (searchQuery) params.set("q", searchQuery);
-        if (userCoords) {
-          params.set("lat", String(userCoords.lat));
-          params.set("lng", String(userCoords.lng));
-        }
-        const res = await fetch(`/api/chargers?${params.toString()}`);
-        if (res.ok && active) {
-          const data = await res.json();
-          setDbChargers(data.chargers || []);
-        }
-      } catch (err) {
-        console.error("Failed to fetch chargers:", err);
-      } finally {
-        if (active) setLoading(false);
-      }
-    }
-
-    const delayDebounce = setTimeout(() => {
-      fetchChargers();
-    }, 300);
-
-    return () => {
-      active = false;
-      clearTimeout(delayDebounce);
-    };
-  }, [searchQuery, userCoords]);
-
-  const handleGeolocate = () => {
-    if (!navigator.geolocation) {
-      setLocationError("Geolocation is not supported by your browser.");
-      return;
-    }
-    // Simple secure context check (Chrome / modern browsers block geolocation on insecure HTTP)
-    const isLocal = typeof window !== "undefined" && (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1");
-    if (typeof window !== "undefined" && !window.isSecureContext && !isLocal) {
-      setLocationError("Proximity search requires a secure context (HTTPS).");
-      return;
-    }
-
-    setLocationError("");
-    navigator.geolocation.getCurrentPosition(
-      (position) => {
-        setUserCoords({
-          lat: position.coords.latitude,
-          lng: position.coords.longitude,
-        });
-      },
-      (error) => {
-        console.warn("Geolocation error:", error);
-        setLocationError("Permission denied or location unavailable.");
-      },
-      { enableHighAccuracy: true, timeout: 5000, maximumAge: 0 }
-    );
-  };
-
-  const handleRequestBooking = async (chargerId: string) => {
-    if (!user) {
-      router.push("/login");
-      return;
-    }
-    setBookingLoaderId(chargerId);
-    setBookingError("");
-    try {
-      const res = await fetch("/api/bookings", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ chargerId }),
-      });
-      const data = await res.json();
-      console.debug("handleRequestBooking response", res.status, data);
-      if (!res.ok) {
-        setBookingError(data.error || "Failed to request booking.");
-        // show immediate alert for debugging
-        alert("Booking failed: " + (data.error || res.statusText));
-        if (data.bookingId) {
-          router.push(`/booking/${data.bookingId}`);
-        }
-      } else {
-        router.push(`/booking/${data.bookingId}`);
-      }
-    } catch (err) {
-      console.error("Booking error:", err);
-      setBookingError("Network error. Please try again.");
-      alert("Network error while creating booking: " + String(err));
-    } finally {
-      setBookingLoaderId("");
-    }
-  };
+  // Custom hooks
+  const { user, handleSignOut } = useAuth({ initialUser });
+  const { theme, toggleTheme } = useTheme();
+  const { userCoords, locationError, setLocationError, handleGeolocate, setUserCoords } = useGeolocation({ initialCoords: null });
+  const {
+    dbChargers,
+    loading,
+    favorites,
+    bookingLoaderId,
+    bookingError,
+    setBookingError,
+    total,
+    setTotal,
+    toggleFavorite,
+    handleRequestBooking,
+    getFilteredChargers,
+  } = useChargers({
+    initialUser,
+    searchQuery,
+    userCoords,
+    filterType,
+    radius,
+    maxPrice,
+    plugTypes,
+    page,
+  });
 
   // Hero Carousel Auto-play
   useEffect(() => {
@@ -264,42 +186,6 @@ export default function LandingPageClient({ initialUser }: LandingPageProps) {
     setCurrentSlide((prev) => (prev - 1 + HERO_SLIDES.length) % HERO_SLIDES.length);
   };
 
-  // Listen to auth state changes
-  useEffect(() => {
-    const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
-      setUser(session?.user ?? null);
-    });
-    return () => {
-      listener?.subscription.unsubscribe();
-    };
-  }, [supabase]);
-
-  // Handle Theme Init
-  useEffect(() => {
-    const storedTheme = document.documentElement.getAttribute("data-theme") as "light" | "dark" | null;
-    if (storedTheme) {
-      setTheme(storedTheme);
-    } else {
-      const systemPrefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
-      const initialTheme = systemPrefersDark ? "dark" : "light";
-      setTheme(initialTheme);
-      document.documentElement.setAttribute("data-theme", initialTheme);
-    }
-  }, []);
-
-  const toggleTheme = () => {
-    const nextTheme = theme === "light" ? "dark" : "light";
-    setTheme(nextTheme);
-    document.documentElement.setAttribute("data-theme", nextTheme);
-    try {
-      // Persist theme in a cookie so the server can read it during SSR and
-      // render the same `data-theme` attribute, preventing hydration warnings.
-      document.cookie = `theme=${encodeURIComponent(nextTheme)}; path=/; max-age=${60 * 60 * 24 * 365}; samesite=lax`;
-    } catch (e) {
-      /* ignore */
-    }
-  };
-
   // Carousel controls
   // `visibleSteps` is a client-only responsive value. Initialize to 3 (desktop)
   // so server and client start the same to avoid hydration mismatch, then
@@ -322,86 +208,6 @@ export default function LandingPageClient({ initialUser }: LandingPageProps) {
   const slideNext = () => {
     setCarouselIndex((prev) => Math.min(maxCarouselIndex, prev + 1));
   };
-
-  // Favorites logic
-  const toggleFavorite = (chargerId: string, e: React.MouseEvent) => {
-    e.stopPropagation();
-    e.preventDefault();
-    setFavorites((prev) =>
-      prev.includes(chargerId) ? prev.filter((id) => id !== chargerId) : [...prev, chargerId]
-    );
-  };
-
-  // Sign out helper
-  const handleSignOut = async () => {
-    try {
-      console.log("Signing out — cookies before:", document.cookie);
-      console.log("localStorage keys before:", Object.keys(localStorage));
-      const { error } = await supabase.auth.signOut({ scope: "local" });
-      console.log("signOut response error:", error);
-      if (error) {
-        console.warn("Local signOut failed, attempting global signOut", error);
-        const { error: err2 } = await supabase.auth.signOut();
-        console.log("global signOut response error:", err2);
-      }
-      console.log("Signing out — cookies after:", document.cookie);
-      console.log("localStorage keys after:", Object.keys(localStorage));
-    } catch (err) {
-      console.error("Sign out error:", err);
-    } finally {
-      setUser(null);
-      try {
-        router.push("/");
-      } catch (e) {}
-      router.refresh();
-      // small delay then hard reload to ensure cookies/localStorage cleared
-      setTimeout(() => window.location.reload(), 400);
-    }
-  };
-
-  // Filtered Chargers list based on UI selections
-  const getFilteredChargers = () => {
-    return dbChargers.filter((charger) => {
-      if (!charger) return false;
-
-      // 1. Category Chips (All, Home Charger, Apartment, Fast Charging, Verified Host, etc.)
-      let matchesCategory = true;
-      if (activeCategory === "Home Charger") {
-        matchesCategory = charger.category === "Home Charger" || String(charger.chargerType).toLowerCase().includes("home") || String(charger.chargerType).toLowerCase().includes("ac");
-      } else if (activeCategory === "Apartment") {
-        matchesCategory = charger.category === "Apartment" || String(charger.chargerType).toLowerCase().includes("apartment") || String(charger.title).toLowerCase().includes("apartment") || String(charger.description).toLowerCase().includes("apartment");
-      } else if (activeCategory === "Fast Charging") {
-        matchesCategory = String(charger.chargerType).toLowerCase().includes("dc") || String(charger.chargerType).toLowerCase().includes("fast");
-      } else if (activeCategory === "Verified Host") {
-        matchesCategory = !!charger.isSuperhost;
-      } else if (activeCategory === "24/7 Available") {
-        const listAmenities = Array.isArray(charger.amenities) ? charger.amenities : [];
-        matchesCategory = listAmenities.some((a: string) => a.toLowerCase().includes("24/7"));
-      }
-
-      // 2. Dropdown Charger Type Filter
-      let matchesType = true;
-      if (filterType === "AC Charger") {
-        matchesType = String(charger.chargerType).toLowerCase().includes("ac");
-      } else if (filterType === "DC Fast") {
-        matchesType = String(charger.chargerType).toLowerCase().includes("dc") || String(charger.chargerType).toLowerCase().includes("fast");
-      } else if (filterType === "Home Charger") {
-        matchesType = charger.category === "Home Charger" || String(charger.chargerType).toLowerCase().includes("home") || String(charger.chargerType).toLowerCase().includes("ac");
-      }
-
-      return matchesCategory && matchesType;
-    }).sort((a, b) => {
-      // 3. Sort Order
-      if (sortOrder === "Price: Low to High") {
-        return (Number(a.pricePerKwh) || 0) - (Number(b.pricePerKwh) || 0);
-      } else if (sortOrder === "Highest Rated") {
-        return (Number(b.rating) || 0) - (Number(a.rating) || 0);
-      }
-      return 0;
-    });
-  };
-
-  const filteredChargers = getFilteredChargers();
 
   return (
     <div className="flex flex-col min-h-screen">
@@ -751,80 +557,35 @@ export default function LandingPageClient({ initialUser }: LandingPageProps) {
               position: "relative"
             }}>
               <span>⚠️ {bookingError}</span>
-              <button onClick={() => setBookingError("")} style={{ background: "none", border: "none", color: "inherit", cursor: "pointer", fontWeight: "bold" }}>✕</button>
+              <button onClick={() => bookingError && setBookingError("")} style={{ background: "none", border: "none", color: "inherit", cursor: "pointer", fontWeight: "bold" }}>✕</button>
             </div>
           )}
 
-          <div className="filter-bar fade-in" role="search" aria-label="Filter chargers">
-            <div className="search-box">
-              <Search className="w-5 h-5 text-gray-400" />
-              <input
-                type="text"
-                placeholder="City, area or pin code..."
-                aria-label="Search location"
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-              />
-            </div>
-            <button
-              type="button"
-              onClick={handleGeolocate}
-              className="btn btn-outline"
-              style={{
-                height: "48px",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                gap: "6px",
-                borderRadius: "var(--radius-xl)",
-                border: userCoords ? "1.5px solid var(--color-primary)" : "1.5px solid var(--color-border)",
-                color: userCoords ? "var(--color-primary)" : "inherit",
-                background: userCoords ? "rgba(26,107,74,0.06)" : "transparent",
-              }}
-            >
-              <MapPin className="w-4 h-4" />
-              {userCoords ? "Proximity On" : "Nearby Me"}
-            </button>
-            <select
-              className="filter-select"
-              aria-label="Charger type"
-              value={filterType}
-              onChange={(e) => setFilterType(e.target.value)}
-            >
-              <option>All Types</option>
-              <option>AC Charger</option>
-              <option>DC Fast</option>
-              <option>Home Charger</option>
-            </select>
-            <select
-              className="filter-select"
-              aria-label="Sort order"
-              value={sortOrder}
-              onChange={(e) => setSortOrder(e.target.value)}
-            >
-              <option>Nearest First</option>
-              <option>Price: Low to High</option>
-              <option>Highest Rated</option>
-            </select>
-            <button
-              className="btn btn-primary"
-              style={{ borderRadius: "var(--radius-xl)", padding: "var(--space-3) var(--space-5)" }}
-              onClick={() => {
-                setSearchQuery("");
-                setFilterType("All Types");
-                setSortOrder("Nearest First");
-                setUserCoords(null);
-                setLocationError("");
-              }}
-            >
-              <SlidersHorizontal className="w-4 h-4 mr-1" />
-              Reset
-            </button>
-          </div>
+{/* FilterBar component */}
+      <FilterBar
+        searchQuery={searchQuery}
+        onSearchChange={setSearchQuery}
+        filterType={filterType}
+        onFilterTypeChange={setFilterType}
+        sortOrder={sortOrder}
+        onSortOrderChange={setSortOrder}
+        userCoords={userCoords}
+        onGeolocate={handleGeolocate}
+        onReset={() => {
+          setSearchQuery("");
+          setFilterType("All Types");
+          setSortOrder("Nearest First");
+          setUserCoords(null);
+          setLocationError("");
+          setRadius(50);
+          setMaxPrice("");
+          setPlugTypes([]);
+        }}
+      />
 
           <div className="listings-meta">
             <p className="listings-count">
-              Showing <strong>{filteredChargers.length} chargers</strong>
+              Showing <strong>{getFilteredChargers().length} chargers</strong>
             </p>
             <div className="sort-row">
               <span>Sort:</span>
@@ -853,210 +614,24 @@ export default function LandingPageClient({ initialUser }: LandingPageProps) {
           </div>
 
           {/* LISTINGS GRID */}
-          <div className="listings-grid" id="listingsGrid" role="list" aria-label="EV charger listings">
-            {loading ? (
-              Array.from({ length: 6 }).map((_, i) => (
-                <div
-                  key={i}
-                  className="animate-pulse"
-                  style={{
-                    background: "var(--color-surface-2)",
-                    height: "360px",
-                    borderRadius: "16px",
-                    border: "1.5px solid var(--color-border)",
-                    boxShadow: "0 2px 8px rgba(0,0,0,0.04)"
-                  }}
-                />
-              ))
-            ) : filteredChargers.length === 0 ? (
-              <div className="col-span-full text-center py-16 text-gray-500">
-                No chargers found. Try resetting filters or search query.
-              </div>
-            ) : (
-              filteredChargers.map((charger) => {
-                const distanceText = charger.distanceKm !== null && charger.distanceKm !== undefined
-                  ? `${charger.distanceKm.toFixed(1)} km away`
-                  : null;
-
-                const listAmenities = Array.isArray(charger.amenities) ? charger.amenities : [];
-                const displayTags = [
-                  charger.chargerType || "AC Charger",
-                  charger.plugType || "Type 2",
-                  ...listAmenities.slice(0, 1)
-                ];
-
-                return (
-                  <article
-                    key={charger.id}
-                    className="listing-card"
-                    role="listitem"
-                    style={{
-                      background: "var(--color-surface-2)",
-                      border: "1.5px solid var(--color-border)",
-                      borderRadius: "16px",
-                      overflow: "hidden",
-                      display: "flex",
-                      flexDirection: "column",
-                      position: "relative",
-                      transition: "transform 0.2s ease, box-shadow 0.2s ease"
-                    }}
-                  >
-                    <div style={{ position: "relative", width: "100%", aspectRatio: "3/2", overflow: "hidden", background: "var(--color-surface-offset)" }}>
-                      {charger.imageUrl ? (
-                        <img
-                          src={charger.imageUrl}
-                          alt={charger.title}
-                          style={{ width: "100%", height: "100%", objectFit: "cover" }}
-                        />
-                      ) : (
-                        <div style={{
-                          width: "100%",
-                          height: "100%",
-                          background: "linear-gradient(135deg, #1a6b4a 0%, #114932 100%)",
-                          color: "white",
-                          display: "flex",
-                          alignItems: "center",
-                          justifyContent: "center",
-                          fontSize: "3rem"
-                        }}>
-                          ⚡
-                        </div>
-                      )}
-                      
-                      {/* Save to Favorites icon */}
-                      <button
-                        onClick={(e) => toggleFavorite(charger.id, e)}
-                        className={`listing-fav ${favorites.includes(charger.id) ? "active" : ""}`}
-                        style={{
-                          position: "absolute",
-                          top: "12px",
-                          right: "12px",
-                          width: "32px",
-                          height: "32px",
-                          borderRadius: "50%",
-                          background: "rgba(255,255,255,0.9)",
-                          border: "none",
-                          display: "grid",
-                          placeItems: "center",
-                          cursor: "pointer",
-                          zIndex: 2,
-                          boxShadow: "0 2px 8px rgba(0,0,0,0.15)"
-                        }}
-                      >
-                        <Heart
-                          className="w-4 h-4"
-                          fill={favorites.includes(charger.id) ? "var(--color-error)" : "none"}
-                        />
-                      </button>
-
-                      {charger.isSuperhost && (
-                        <div style={{
-                          position: "absolute",
-                          top: "12px",
-                          left: "12px",
-                          background: "rgba(255,255,255,0.95)",
-                          color: "#1a1916",
-                          padding: "4px 8px",
-                          borderRadius: "6px",
-                          fontSize: "11px",
-                          fontWeight: 700,
-                          boxShadow: "0 2px 6px rgba(0,0,0,0.1)",
-                          zIndex: 2
-                        }}>
-                          ★ SUPERHOST
-                        </div>
-                      )}
-                    </div>
-
-                    <div style={{ padding: "16px", display: "flex", flexDirection: "column", flexGrow: 1, gap: "8px" }}>
-                      {/* Top Row: Locality & Rating */}
-                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
-                        <span style={{ fontSize: "11px", fontWeight: 700, color: "var(--color-primary)", letterSpacing: "0.05em", textTransform: "uppercase" }}>
-                          {charger.area || charger.city || "Verified Slot"}
-                        </span>
-                        <div style={{ display: "flex", alignItems: "center", gap: "3px", fontSize: "12px", fontWeight: 600 }}>
-                          <span>★</span>
-                          <span>{charger.rating ? charger.rating.toFixed(2) : "New"}</span>
-                          {charger.reviewsCount ? (
-                            <span style={{ color: "var(--color-text-muted)", fontWeight: 400 }}>
-                              ({charger.reviewsCount})
-                            </span>
-                          ) : null}
-                        </div>
-                      </div>
-
-                      {/* Title */}
-                      <h3 style={{ fontSize: "15px", fontWeight: 700, color: "var(--color-text)", margin: 0, lineHeight: 1.3 }}>
-                        {charger.title}
-                      </h3>
-
-                      {/* Location details */}
-                      <div style={{ display: "flex", alignItems: "center", gap: "4px", fontSize: "12px", color: "var(--color-text-muted)" }}>
-                        <MapPin className="w-3.5 h-3.5 flex-shrink-0" />
-                        <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                          {charger.address}
-                        </span>
-                        {distanceText && (
-                          <>
-                            <span>·</span>
-                            <span style={{ fontWeight: 600, color: "var(--color-text)" }}>{distanceText}</span>
-                          </>
-                        )}
-                      </div>
-
-                      {/* Tag list */}
-                      <div style={{ display: "flex", flexWrap: "wrap", gap: "6px", marginTop: "4px" }}>
-                        {displayTags.map((tag) => (
-                          <span
-                            key={tag}
-                            style={{
-                              padding: "3px 8px",
-                              borderRadius: "6px",
-                              fontSize: "11px",
-                              fontWeight: 600,
-                              background: "var(--color-surface-offset)",
-                              color: "var(--color-text-muted)"
-                            }}
-                          >
-                            {tag}
-                          </span>
-                        ))}
-                      </div>
-
-                      {/* Footer: Price & CTA */}
-                      <div style={{ marginTop: "auto", paddingTop: "12px", borderTop: "1px solid var(--color-border)", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                        <div>
-                          <div style={{ fontSize: "16px", fontWeight: 800, color: "var(--color-text)" }}>
-                            ₹{charger.pricePerKwh.toFixed(2)}
-                            <span style={{ fontSize: "11px", fontWeight: 500, color: "var(--color-text-muted)" }}>/kWh</span>
-                          </div>
-                        </div>
-                        
-                        <button
-                          onClick={() => handleRequestBooking(charger.id)}
-                          disabled={bookingLoaderId !== ""}
-                          style={{
-                            background: "linear-gradient(135deg, #1a6b4a, #22914f)",
-                            color: "white",
-                            border: "none",
-                            padding: "8px 16px",
-                            borderRadius: "8px",
-                            fontSize: "13px",
-                            fontWeight: 700,
-                            cursor: bookingLoaderId !== "" ? "not-allowed" : "pointer",
-                            boxShadow: "0 4px 12px rgba(26,107,74,0.15)",
-                            transition: "opacity 0.2s"
-                          }}
-                        >
-                          {bookingLoaderId === charger.id ? "Booking..." : "Book Now"}
-                        </button>
-                      </div>
-                    </div>
-                  </article>
-                );
-              })
-            )}
-          </div>
+          <SearchListings
+            searchQuery={searchQuery}
+            userCoords={userCoords}
+            filterType={filterType}
+            sortOrder={sortOrder}
+            radius={radius}
+            maxPrice={maxPrice}
+            plugTypes={plugTypes}
+            page={page}
+            favorites={favorites}
+            bookingLoaderId={bookingLoaderId}
+            bookingError={bookingError}
+            onToggleFavorite={toggleFavorite}
+            onRequestBooking={handleRequestBooking}
+            onSetPage={setPage}
+            onSetTotal={setTotal}
+            getFilteredChargers={getFilteredChargers}
+          />
         </div>
       </section>
 

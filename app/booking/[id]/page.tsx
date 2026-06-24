@@ -1,136 +1,81 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
-import { useParams, useRouter } from "next/navigation";
+import { useEffect, useRef, useState } from "react";
+import { useRouter, useParams } from "next/navigation";
 import Link from "next/link";
 import { getSupabaseBrowserClient } from "@/lib/supabase/browser-client";
 import { User } from "@supabase/supabase-js";
-import { Zap, Clock, CheckCircle2, ArrowLeft, BatteryCharging, CreditCard, Shield } from "lucide-react";
+import { Zap, Clock, CheckCircle2, ArrowLeft, BatteryCharging, CreditCard, Shield, XCircle, Timer } from "lucide-react";
+import { useBookingActions } from "./useBookingActions";
 
-// Warm premium style mapping
-const S = {
+const S: Record<string, React.CSSProperties> = {
   page: {
     minHeight: "100vh",
-    background: "#f7f5f0",
-    fontFamily: "'Satoshi', 'DM Sans', sans-serif",
-    paddingTop: "80px",
-    paddingBottom: "60px",
-  } as React.CSSProperties,
-
+    background: "linear-gradient(135deg, #f9f7f4 0%, #f0ebe4 100%)",
+    fontFamily: "Inter, system-ui, sans-serif",
+    color: "#1a1916",
+  },
+  container: {
+    maxWidth: "900px",
+    margin: "0 auto",
+    padding: "24px",
+  },
+  card: {
+    background: "white",
+    borderRadius: "16px",
+    boxShadow: "0 10px 30px rgba(0,0,0,0.08)",
+    padding: "24px",
+    marginTop: "24px",
+  },
   nav: {
-    position: "fixed" as const,
-    top: 0,
-    left: 0,
-    right: 0,
-    zIndex: 100,
-    background: "rgba(247,245,240,0.92)",
-    backdropFilter: "blur(20px)",
-    borderBottom: "1px solid rgba(26,25,22,0.08)",
-    padding: "0 24px",
     display: "flex",
     alignItems: "center",
-    height: "64px",
-    gap: "16px",
-  } as React.CSSProperties,
-
-  navLogo: {
+    justifyContent: "space-between",
+    padding: "16px 0",
+    marginBottom: "8px",
+  },
+  navLink: {
     display: "flex",
     alignItems: "center",
     gap: "8px",
     textDecoration: "none",
-    color: "inherit",
-    fontWeight: 700,
-    fontSize: "16px",
-    letterSpacing: "-0.02em",
-  } as React.CSSProperties,
-
+    color: "#1a6b4a",
+    fontWeight: 600,
+    fontSize: "14px",
+  },
   logoIcon: {
-    width: "34px",
-    height: "34px",
-    background: "linear-gradient(135deg, #1a6b4a, #22914f)",
-    borderRadius: "8px",
     display: "flex",
     alignItems: "center",
     justifyContent: "center",
-    flexShrink: 0,
-  } as React.CSSProperties,
-
-  backBtn: {
-    marginLeft: "auto",
-    display: "flex",
-    alignItems: "center",
-    gap: "6px",
-    padding: "8px 16px",
-    border: "1.5px solid #d1cdc3",
-    borderRadius: "9999px",
-    background: "white",
-    cursor: "pointer",
-    fontSize: "13px",
-    fontWeight: 600,
-    color: "#1a1916",
-    textDecoration: "none",
-  } as React.CSSProperties,
-
-  container: {
-    maxWidth: "580px",
-    margin: "0 auto",
-    padding: "40px 24px",
-  } as React.CSSProperties,
-
-  card: {
-    background: "white",
-    border: "1.5px solid #e2dfd8",
-    borderRadius: "20px",
-    padding: "32px 24px",
-    boxShadow: "0 4px 16px rgba(26,25,22,0.02)",
-    display: "flex",
-    flexDirection: "column" as const,
-    gap: "24px",
-  } as React.CSSProperties,
-
-  otpBox: {
-    background: "#fafaf8",
-    border: "1.5px solid #d1cdc3",
-    borderRadius: "16px",
-    padding: "24px",
-    textAlign: "center" as const,
-    display: "flex",
-    flexDirection: "column" as const,
-    gap: "12px",
-    alignItems: "center",
-  } as React.CSSProperties,
-
-  otpCode: {
-    fontSize: "36px",
-    fontWeight: 800,
-    letterSpacing: "0.15em",
-    color: "#1a6b4a",
-    fontFamily: "monospace",
-    margin: "8px 0",
-  } as React.CSSProperties,
-
+    width: "36px",
+    height: "36px",
+    background: "linear-gradient(135deg, #1a6b4a, #22914f)",
+    borderRadius: "10px",
+    color: "white",
+  },
   btn: {
-    padding: "14px 24px",
-    borderRadius: "12px",
-    fontSize: "15px",
-    fontWeight: 700,
-    cursor: "pointer",
-    border: "none",
-    fontFamily: "'Satoshi', 'DM Sans', sans-serif",
     display: "flex",
     alignItems: "center",
     justifyContent: "center",
     gap: "8px",
     width: "100%",
-    boxShadow: "0 4px 12px rgba(26,107,74,0.15)",
-    transition: "opacity 150ms ease",
-  } as React.CSSProperties,
+    padding: "14px 20px",
+    borderRadius: "12px",
+    border: "none",
+    fontWeight: 700,
+    fontSize: "15px",
+    cursor: "pointer",
+    transition: "opacity 0.2s",
+  },
   input: {
+    width: "100%",
     padding: "12px 14px",
     borderRadius: "10px",
-    border: "1px solid #0e0a01ff",
-    fontSize: "14px",
-  } as React.CSSProperties,
+    border: "1.5px solid #d1cdc3",
+    fontSize: "16px",
+    outline: "none",
+    transition: "border-color 0.2s",
+  },
 };
 
 export default function BookingDetailPage() {
@@ -145,12 +90,11 @@ export default function BookingDetailPage() {
   const [actionLoading, setActionLoading] = useState(false);
   const [paymentSuccess, setPaymentSuccess] = useState(false);
   const [upiPin, setUpiPin] = useState("");
-  // showCode: true for 3.5s after code is generated, then auto-hides.
-  // If driver clicks again after it hides, we know the timer is fresh (not stale).
   const [showCode, setShowCode] = useState(false);
-  // Duration selector shown after host verifies arrival
   const [selectedDuration, setSelectedDuration] = useState<number | null>(null);
+  const [holdTimeLeft, setHoldTimeLeft] = useState<number | null>(null); // seconds remaining
   const showCodeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const holdTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const supabase = getSupabaseBrowserClient();
 
@@ -165,9 +109,35 @@ export default function BookingDetailPage() {
       }
     }
     checkAuth();
+
+    return () => {
+      if (holdTimerRef.current) clearInterval(holdTimerRef.current);
+    };
   }, []);
 
-  
+  // Countdown timer for hold expiry
+  useEffect(() => {
+    if (holdTimerRef.current) clearInterval(holdTimerRef.current);
+    setHoldTimeLeft(null);
+
+    if (booking?.holdExpiresAt && booking.status === "pending_host_accept") {
+      const updateTimer = () => {
+        const remaining = Math.max(0, Math.floor((new Date(booking.holdExpiresAt).getTime() - Date.now()) / 1000));
+        setHoldTimeLeft(remaining);
+        if (remaining <= 0) {
+          if (holdTimerRef.current) clearInterval(holdTimerRef.current);
+          fetchBookingDetails(); // refresh to get cancelled status
+        }
+      };
+      updateTimer();
+      holdTimerRef.current = setInterval(updateTimer, 1000);
+    }
+
+    return () => {
+      if (holdTimerRef.current) clearInterval(holdTimerRef.current);
+    };
+  }, [booking?.holdExpiresAt, booking?.status]);
+
   async function fetchBookingDetails() {
     setLoading(true);
     try {
@@ -177,6 +147,7 @@ export default function BookingDetailPage() {
         setError(data.error || "Booking not found.");
       } else {
         setBooking(data.booking);
+        setPaymentSuccess(!!data.booking.isPaid);
       }
     } catch (err) {
       console.error(err);
@@ -186,38 +157,64 @@ export default function BookingDetailPage() {
     }
   }
 
- 
-const handleGenerateCode = async () => {
-  setActionLoading(true);
-  setError("");
-  // Clear any existing auto-hide timer
-  if (showCodeTimer.current) clearTimeout(showCodeTimer.current);
+  const handleGenerateCode = async () => {
+    setActionLoading(true);
+    setError("");
+    if (showCodeTimer.current) clearTimeout(showCodeTimer.current);
 
-  try {
-    const res = await fetch(`/api/bookings/${id}/generate-code`, {
-      method: "POST",
-    });
+    try {
+      const res = await fetch(`/api/bookings/${id}/generate-code`, {
+        method: "POST",
+      });
+      const data = await res.json();
 
-    const data = await res.json();
+      if (!res.ok) {
+        setError(data.error || "Failed to generate code.");
+        return;
+      }
 
-    if (!res.ok) {
-      setError(data.error || "Failed to generate code.");
-      return;
+      await fetchBookingDetails();
+      setShowCode(true);
+      showCodeTimer.current = setTimeout(() => {
+        setShowCode(false);
+      }, 3500);
+    } catch (err) {
+      console.error(err);
+      setError("Network error.");
+    } finally {
+      setActionLoading(false);
     }
+  };
 
-    await fetchBookingDetails();
-    // Show code for 3.5 seconds then auto-hide
-    setShowCode(true);
-    showCodeTimer.current = setTimeout(() => {
-      setShowCode(false);
-    }, 3500);
-  } catch (err) {
-    console.error(err);
-    setError("Network error.");
-  } finally {
-    setActionLoading(false);
-  }
-};
+  const handleRegenerateCode = async () => {
+    setActionLoading(true);
+    setError("");
+    if (showCodeTimer.current) clearTimeout(showCodeTimer.current);
+
+    try {
+      const res = await fetch(`/api/bookings/${id}/regenerate-code`, {
+        method: "POST",
+      });
+      const data = await res.json();
+
+      if (!res.ok) {
+        setError(data.error || "Failed to regenerate code.");
+        return;
+      }
+
+      await fetchBookingDetails();
+      setShowCode(true);
+      showCodeTimer.current = setTimeout(() => {
+        setShowCode(false);
+      }, 3500);
+    } catch (err) {
+      console.error(err);
+      setError("Network error.");
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
   const handleStartCharging = async () => {
     setActionLoading(true);
     try {
@@ -252,24 +249,44 @@ const handleGenerateCode = async () => {
     }
   };
 
-  const handlePaymentSubmit = (e: React.FormEvent) => {
+const { cancelBooking } = useBookingActions(id);
+
+const handleCancelBooking = () => cancelBooking(setActionLoading, setError);
+
+  const handlePaymentSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (upiPin.length !== 4 && upiPin.length !== 6) {
       setError("UPI PIN must be 4 or 6 digits.");
       return;
     }
-    setPaymentSuccess(true);
+    setActionLoading(true);
     setError("");
+    try {
+      const res = await fetch(`/api/bookings/${id}/pay`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ pin: upiPin }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setError(data.error || "Payment failed.");
+        return;
+      }
+      setPaymentSuccess(true);
+      await fetchBookingDetails();
+    } catch (err) {
+      console.error(err);
+      setError("Network error during payment.");
+    } finally {
+      setActionLoading(false);
+    }
   };
 
   if (loading) {
     return (
       <div style={S.page}>
-        <div style={S.container}>
-          <div style={{ ...S.card, alignItems: "center", padding: "48px 24px" }}>
-            <Zap className="w-8 h-8 text-primary animate-bounce" />
-            <span style={{ fontSize: "14px", fontWeight: 600, color: "#6e6b63" }}>Retrieving booking session…</span>
-          </div>
+        <div style={{ ...S.container, textAlign: "center", paddingTop: "60px" }}>
+          <div style={{ fontSize: "18px", color: "#6e6b63" }}>Loading booking details...</div>
         </div>
       </div>
     );
@@ -278,144 +295,158 @@ const handleGenerateCode = async () => {
   if (error && !booking) {
     return (
       <div style={S.page}>
-        <div style={S.container}>
-          <div style={{ ...S.card, alignItems: "center", padding: "48px 24px", textAlign: "center" }}>
-            <Shield className="w-12 h-12 text-red-600 mb-3" />
-            <h3 style={{ fontSize: "18px", fontWeight: 700, margin: 0 }}>Error Fetching Session</h3>
-            <p style={{ fontSize: "14px", color: "#6e6b63", marginTop: "6px" }}>{error}</p>
-            <Link href="/" style={{ ...S.btn, background: "#1a6b4a", color: "white", marginTop: "16px" }}>Go back home</Link>
-          </div>
+        <div style={{ ...S.container, ...S.card, color: "#b91c1c", background: "#fef2f2", border: "1.5px solid #fca5a5" }}>
+          <p style={{ margin: 0 }}>{error}</p>
+          <Link href="/" style={{ ...S.navLink, marginTop: "12px", alignSelf: "flex-start" }}>
+            <ArrowLeft size={16} /> Back to Home
+          </Link>
         </div>
       </div>
     );
   }
 
+  if (!booking) {
+    return (
+      <div style={S.page}>
+        <div style={{ ...S.container, ...S.card, textAlign: "center" }}>
+          <p style={{ margin: 0, color: "#6e6b63" }}>Booking not found.</p>
+          <Link href="/" style={{ ...S.navLink, marginTop: "12px", alignSelf: "flex-start" }}>
+            <ArrowLeft size={16} /> Back to Home
+          </Link>
+        </div>
+      </div>
+    );
+  }
+
+  const chargerPowerKw = booking?.charger?.powerKw ?? 7;
+
   return (
     <div style={S.page}>
-      {/* Navbar */}
       <nav style={S.nav}>
-        <Link href="/" style={S.navLogo}>
-          <div style={S.logoIcon}>
-            <Zap className="w-5 h-5 text-white fill-white" />
-          </div>
-          <div>
-            <span style={{ color: "#1a1916" }}>Electric UPI</span>
-          </div>
+        <Link href="/" style={S.navLink}>
+          <ArrowLeft size={16} /> Back
         </Link>
-        <Link href="/" style={S.backBtn}>
-          <ArrowLeft className="w-4 h-4 mr-1" /> Home
-        </Link>
+        <div style={S.logoIcon}>
+          <Zap size={18} fill="white" />
+        </div>
       </nav>
 
       <div style={S.container}>
         <div style={S.card}>
-          {/* Charger Info Header */}
-          <div>
-            <h2 style={{ fontSize: "22px", fontWeight: 800, margin: 0, color: "#1a1916" }}>
-              {booking.charger.title}
-            </h2>
-            <p style={{ fontSize: "14px", color: "#6e6b63", marginTop: "4px", marginBottom: 0 }}>
-              {booking.charger.address}, {booking.charger.city}
-            </p>
+          {/* Charger info */}
+          <div style={{ display: "flex", alignItems: "center", gap: "12px", marginBottom: "12px" }}>
+            <Zap size={24} className="text-pink-500" />
+            <div>
+              <h3 style={{ margin: 0, fontSize: "18px", fontWeight: 800, color: "#1a1916" }}>
+                {booking.charger?.name}
+              </h3>
+              <p style={{ margin: 0, fontSize: "13px", color: "#6e6b63" }}>
+                {booking.charger?.address}
+              </p>
+            </div>
           </div>
 
-          <div style={{ borderTop: "1.5px solid #e2dfd8", paddingTop: "16px" }} />
-
-          {/* Booking State display */}
+          {/* OTP / Code */}
           {booking.status === "pending_host_accept" && (
-            <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "16px", padding: "20px 0", textAlign: "center" }}>
-              <Clock className="w-12 h-12 text-amber-500 animate-pulse" />
-              <div>
-                <h4 style={{ fontSize: "17px", fontWeight: 700, margin: 0 }}>Awaiting Host Acceptance</h4>
-                <p style={{ fontSize: "13px", color: "#6e6b63", marginTop: "4px", maxWidth: "320px" }}>
-                  The host <strong>{booking.host.name}</strong> has been notified. This page will update automatically once accepted.
+            <div style={{ textAlign: "center", padding: "2rem 1.5rem", maxWidth: "500px", margin: "0 auto" }}>
+              <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "1rem", marginBottom: "1.5rem" }}>
+                <Timer className="w-20 h-20 text-amber-500" />
+                <h4 style={{ fontSize: "1.5rem", fontWeight: 800, color: "#1a1916" }}>Host Approval Pending</h4>
+                <p style={{ fontSize: "13px", color: "#6e6b63", textAlign: "center" }}>
+                  The host <strong>{booking.host.name}</strong> needs to accept your request within the next {holdTimeLeft !== null && holdTimeLeft > 0 ? `${Math.floor(holdTimeLeft / 60)}:${String(holdTimeLeft % 60).padStart(2, "0")}` : "0:00"} seconds.
                 </p>
+                {holdTimeLeft !== null && holdTimeLeft > 0 ? (
+                  <div style={{
+                    background: "linear-gradient(135deg, #fef3c7, #fde68a)",
+                    border: "1px solid #f59e0b",
+                    borderRadius: "12px",
+                    padding: "0.75rem 1.25rem",
+                    marginBottom: "1rem",
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: "0.5rem",
+                  }}>
+                    <Timer className="w-5 h-5 text-amber-600" />
+                    <span style={{ fontWeight: 700, color: "#92400e", fontSize: "1.1rem" }}>
+                      Expires in {Math.floor(holdTimeLeft / 60)}:{String(holdTimeLeft % 60).padStart(2, "0")}
+                    </span>
+                  </div>
+                ) : null}
               </div>
+              <button
+                onClick={handleCancelBooking}
+                disabled={actionLoading || holdTimeLeft === 0}
+                style={{
+                  background: "linear-gradient(135deg, #ef4444, #dc2626)",
+                  color: "#fff",
+                  border: "none",
+                  padding: "0.75rem 2rem",
+                  borderRadius: "12px",
+                  fontWeight: 600,
+                  cursor: actionLoading ? "not-allowed" : "pointer",
+                  opacity: actionLoading ? 0.6 : 1,
+                  marginBottom: "1rem"
+                }}
+              >
+                {actionLoading ? "Cancelling..." : "Cancel Booking"}
+              </button>
             </div>
           )}
 
           {booking.status === "awaiting_driver_arrival" && (
-            <div style={S.otpBox}>
-              <h4 style={{ fontSize: "16px", fontWeight: 700, margin: 0, color: "#1a1916" }}>
-                Arrival Verification
-              </h4>
-              <p style={{ fontSize: "12px", color: "#6e6b63", margin: "8px 0 0 0" }}>
-                {!booking.secretCode
-                  ? "Click the button when you reach the host location."
-                  : showCode
-                  ? "Share this code with the host. It disappears in a few seconds."
-                  : "Code hidden. Click \"Show Code\" to display it again."}
-              </p>
-
-              {/* Code display — visible only during the 3.5s auto-show window */}
-              {booking.secretCode && showCode && (
-                <div style={{ marginTop: "16px", display: "flex", flexDirection: "column", alignItems: "center", gap: 8 }}>
-                  <div style={S.otpCode}>{booking.secretCode}</div>
-                  <div style={{ fontSize: "12px", color: "#6e6b63" }}>
-                    Valid until: <span style={{ fontWeight: 700 }}>{booking.codeExpiresAt ? new Date(booking.codeExpiresAt).toLocaleTimeString() : "-"}</span>
-                  </div>
-                </div>
-              )}
-
-              <div style={{ marginTop: "16px", display: "flex", gap: "8px", flexWrap: "wrap" }}>
-                {!booking.secretCode ? (
-                  <button
-                    onClick={handleGenerateCode}
-                    disabled={actionLoading}
-                    style={{
-                      ...S.btn,
-                      background: "linear-gradient(135deg, #1a6b4a, #22914f)",
-                      color: "white",
-                      flex: 1,
-                      opacity: actionLoading ? 0.7 : 1,
-                    }}
-                  >
-                    Click on Arrival
-                  </button>
-                ) : showCode ? (
-                  <button
-                    onClick={handleGenerateCode}
-                    disabled={actionLoading}
-                    style={{
-                      ...S.btn,
-                      background: "white",
-                      border: "1.5px solid #d1cdc3",
-                      color: "#1a1916",
-                      boxShadow: "none",
-                      flex: 1,
-                      opacity: actionLoading ? 0.7 : 1,
-                    }}
-                  >
-                    Regenerate Code
-                  </button>
-                ) : (
-                  <button
-                    onClick={() => {
-                      if (showCodeTimer.current) clearTimeout(showCodeTimer.current);
-                      setShowCode(true);
-                      showCodeTimer.current = setTimeout(() => setShowCode(false), 3500);
-                    }}
-                    style={{
-                      ...S.btn,
-                      background: "linear-gradient(135deg, #1a6b4a, #22914f)",
-                      color: "white",
-                      flex: 1,
-                    }}
-                  >
-                    Show Code
-                  </button>
-                )}
-              </div>
+        <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "16px", padding: "20px 0", textAlign: "center" }}>
+          <Shield className="w-16 h-16 text-amber-500" />
+          <div>
+            <h4 style={{ fontSize: "18px", fontWeight: 800, margin: 0, color: "#1a1916" }}>Generate Arrival Code</h4>
+            <p style={{ fontSize: "13px", color: "#6e6b63", marginTop: "6px" }}>
+              Generate a 6-digit OTP and share it with host <strong>{booking.host?.name}</strong> to begin your session.
+            </p>
+          </div>
+          {showCode && booking.secretCode && (
+            <div style={{
+              background: "linear-gradient(135deg, #fef3c7, #fde68a)",
+              border: "2px dashed #f59e0b",
+              borderRadius: "12px",
+              padding: "16px 24px",
+              fontSize: "28px",
+              fontWeight: 800,
+              letterSpacing: "0.2em",
+              color: "#92400e",
+            }}>
+              {booking.secretCode}
             </div>
           )}
-
-          {booking.status === "verified" && (
+          <button
+            onClick={handleGenerateCode}
+            disabled={actionLoading}
+            style={{
+              ...S.btn,
+              background: "linear-gradient(135deg, #f59e0b, #d97706)",
+              color: "white",
+              opacity: actionLoading ? 0.7 : 1,
+            }}
+          >
+            <Shield className="w-4 h-4" />
+            {actionLoading ? "Generating..." : showCode ? "Regenerate Code" : "Generate OTP Code"}
+          </button>
+          {showCode && (
+            <p style={{ fontSize: "12px", color: "#6e6b63", marginTop: "4px" }}>
+              Share this code with the host. They will verify it to start the charging session.
+            </p>
+          )}
+        </div>
+      )}
+      {(booking.status === "verified" || booking.status === "active") && (
             <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "16px", padding: "20px 0", textAlign: "center" }}>
-              <CheckCircle2 className="w-12 h-12 text-green-600" />
+              <CheckCircle2 className="w-16 h-16 text-green-600" />
               <div>
-                <h4 style={{ fontSize: "17px", fontWeight: 700, margin: 0 }}>Arrival Verified!</h4>
+                <h4 style={{ fontSize: "18px", fontWeight: 800, margin: 0, color: "#1a6b4a" }}>
+                  {booking.status === "verified" ? "Host Verified Arrival" : "Ready to Charge"}
+                </h4>
                 <p style={{ fontSize: "13px", color: "#6e6b63", marginTop: "6px" }}>
-                  Select your charging duration. Your estimated cost will be shown below.
+                  {booking.status === "verified"
+                    ? "The host has verified your arrival. Select charging duration to begin."
+                    : "Your booking is active. Select duration and start charging."}
                 </p>
               </div>
 
@@ -425,8 +456,8 @@ const handleGenerateCode = async () => {
                   { label: "10 min", minutes: 10 },
                   { label: "15 min", minutes: 15 },
                   { label: "30 min", minutes: 30 },
-                  { label: "1 hr",   minutes: 60 },
-                  { label: "2 hr",   minutes: 120 },
+                  { label: "1 hr", minutes: 60 },
+                  { label: "2 hr", minutes: 120 },
                 ].map(({ label, minutes }) => (
                   <button
                     key={minutes}
@@ -450,8 +481,10 @@ const handleGenerateCode = async () => {
               {/* Estimated cost — frontend only, no backend billing */}
               {selectedDuration !== null && (
                 <div style={{ background: "#f0fdf4", border: "1.5px solid #bbf7d0", borderRadius: "12px", padding: "12px 20px", fontSize: "14px", color: "#15803d", fontWeight: 600 }}>
-                  Estimated cost: ₹{((selectedDuration / 60) * booking.charger.pricePerKwh).toFixed(2)}
-                  <span style={{ fontWeight: 400, color: "#6e6b63", fontSize: "12px", marginLeft: "6px" }}>(for {selectedDuration} min)</span>
+                  Estimated cost: ₹{((chargerPowerKw * (selectedDuration / 60)) * (booking?.charger?.pricePerKwh || 0)).toFixed(2)}
+                  <span style={{ fontWeight: 400, color: "#6e6b63", fontSize: "12px", marginLeft: "6px" }}>
+                    ({selectedDuration} min @ {chargerPowerKw} kW)
+                  </span>
                 </div>
               )}
 
@@ -477,57 +510,71 @@ const handleGenerateCode = async () => {
               <button
                 onClick={handleEndCharging}
                 disabled={actionLoading}
-                style={{ ...S.btn, background: "#db2777", color: "white" }}
+                style={{ ...S.btn, background: "linear-gradient(135deg, #b91c1c, #dc2626)", color: "white" }}
               >
-                Stop Charging Session
+                <BatteryCharging className="w-4 h-4" /> Stop Charging
               </button>
             </div>
           )}
 
-          {booking.status === "completed" && (
+          {booking.status === "completed" && booking.billingStatus === "draft" && (
+            <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "16px", padding: "20px 0", textAlign: "center" }}>
+              <Clock className="w-16 h-16 text-pink-500" />
+              <div>
+                <h4 style={{ fontSize: "18px", fontWeight: 800, margin: 0, color: "#9d174d" }}>Session Complete</h4>
+                <p style={{ fontSize: "13px", color: "#6e6b63", marginTop: "6px" }}>
+                  The host is reviewing your session and will finalize billing shortly.
+                </p>
+              </div>
+            </div>
+          )}
+
+          {booking.status === "completed" && booking.billingStatus === "finalized" && (
             <div style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
-              <div style={{ background: "#f8fafc", border: "1.5px solid #e2e8f0", borderRadius: "14px", padding: "20px", display: "flex", flexDirection: "column", gap: "12px" }}>
-                <div style={{ display: "flex", justifyContent: "space-between" }}>
-                  <span style={{ fontSize: "13px", color: "#6e6b63" }}>Energy Consumed:</span>
-                  <strong style={{ fontSize: "14px" }}>{booking.energyKwh || "10.5"} kWh</strong>
-                </div>
-                <div style={{ display: "flex", justifyContent: "space-between" }}>
-                  <span style={{ fontSize: "13px", color: "#6e6b63" }}>Rate:</span>
-                  <strong style={{ fontSize: "14px" }}>₹{booking.charger.pricePerKwh.toFixed(2)} / kWh</strong>
-                </div>
-                <div style={{ borderTop: "1px solid #e2e8f0", margin: "4px 0" }} />
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
-                  <span style={{ fontSize: "14px", fontWeight: 700 }}>Total Cost:</span>
-                  <strong style={{ fontSize: "20px", color: "#1a6b4a" }}>₹{booking.cost}</strong>
+              <div style={{ background: "#f0fdf4", border: "1.5px solid #bbf7d0", borderRadius: "12px", padding: "16px" }}>
+                <h4 style={{ margin: "0 0 12px 0", fontSize: "16px", fontWeight: 800, color: "#1a6b4a" }}>Bill Summary</h4>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "8px", fontSize: "13px", color: "#1a1916" }}>
+                  <div>Energy</div>
+                  <div style={{ textAlign: "right" }}>{booking.energyKwh?.toFixed(2)} kWh</div>
+                  <div>Duration</div>
+                  <div style={{ textAlign: "right" }}>{Math.round(booking.durationMinutes)} min</div>
+                  <div>Rate</div>
+                  <div style={{ textAlign: "right" }}>₹{booking.charger.pricePerKwh}/kWh</div>
+                  <div style={{ fontWeight: 700, borderTop: "1px solid #bbf7d0", paddingTop: "8px", marginTop: "4px" }}>Total</div>
+                  <div style={{ textAlign: "right", fontWeight: 700, borderTop: "1px solid #bbf7d0", paddingTop: "8px", marginTop: "4px" }}>₹{booking.cost?.toFixed(2)}</div>
                 </div>
               </div>
 
-              {paymentSuccess ? (
-                <div style={{ background: "#dcfce7", border: "1.5px solid #bbf7d0", borderRadius: "12px", padding: "16px", textAlign: "center", color: "#15803d", display: "flex", flexDirection: "column", gap: "8px" }}>
-                  <CheckCircle2 className="w-8 h-8 mx-auto" />
-                  <span style={{ fontWeight: 800 }}>Payment Successful!</span>
-                  <span style={{ fontSize: "13px" }}>₹{booking.cost} split settled directly via UPI to host.</span>
+              {paymentSuccess || booking.isPaid ? (
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: "8px", color: "#1a6b4a", fontWeight: 600 }}>
+                  <CheckCircle2 size={20} />
+                  <span>Payment successful</span>
+                  {booking.isPaid && <span style={{ color: "#6e6b63", fontWeight: 400 }}>(already paid)</span>}
                 </div>
               ) : (
                 <form onSubmit={handlePaymentSubmit} style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-                  <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
-                    <label style={{ fontSize: "12px", fontWeight: 700, color: "#1a1916" }}>UPI PIN (Simulated Split payment)</label>
+                  <div>
+                    <label style={{ display: "block", marginBottom: "6px", fontSize: "13px", fontWeight: 600, color: "#1a1916" }}>
+                      UPI PIN
+                    </label>
                     <input
                       type="password"
+                      inputMode="numeric"
+                      pattern="[0-9]*"
                       maxLength={6}
-                      pattern="\d*"
-                      placeholder="Enter 4 or 6 digit UPI PIN"
                       value={upiPin}
-                      onChange={(e) => setUpiPin(e.target.value.replace(/\D/g, ""))}
+                      onChange={(e) => setUpiPin(e.target.value.replace(/\D/g, "").slice(0, 6))}
+                      style={S.input}
+                      placeholder="Enter 4 or 6 digit PIN"
                       required
-                      style={{ ...S.input, width: "100%", height: "48px" }}
                     />
                   </div>
                   <button
                     type="submit"
-                    style={{ ...S.btn, background: "linear-gradient(135deg, #1a6b4a, #22914f)", color: "white" }}
+                    disabled={actionLoading}
+                    style={{ ...S.btn, background: "linear-gradient(135deg, #1a6b4a, #22914f)", color: "white", opacity: actionLoading ? 0.7 : 1 }}
                   >
-                    <CreditCard className="w-4 h-4" /> Pay ₹{booking.cost} via UPI
+                    <CreditCard className="w-4 h-4" /> Pay ₹{booking.cost?.toFixed(2)} via UPI
                   </button>
                 </form>
               )}

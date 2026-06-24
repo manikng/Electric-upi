@@ -1,8 +1,8 @@
 import { NextResponse } from "next/server";
 import { createSupabaseServerClient } from "@/lib/supabase/server-client";
 import { db } from "@/lib/db";
-import { bookings, chargers } from "@/lib/schema";
-import { eq, and, ne } from "drizzle-orm";
+import { bookings, chargers, users } from "@/lib/schema";
+import { eq, and } from "drizzle-orm";
 
 // ── POST /api/bookings ──
 // Authenticated drivers can request to book a charger.
@@ -48,16 +48,19 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "You cannot book your own charger." }, { status: 400 });
     }
 
-    // Adversarial: Driver already has an active booking that is not completed.
-    // Select only minimal fields to avoid referencing newer columns that may
-    // not exist in older databases.
+    // Allow multiple pending bookings per driver (driver can negotiate with
+    // several hosts simultaneously).  Only block if the driver already has a
+    // booking that is actively in-progress (awaiting_driver_arrival / active /
+    // charging) — they should finish that session first.
+    const { inArray } = await import("drizzle-orm");
+    const activeStatuses = ["awaiting_driver_arrival", "active", "charging"];
     const existingActiveBookings = await db
       .select({ id: bookings.id, status: bookings.status })
       .from(bookings)
       .where(
         and(
           eq(bookings.driverId, user.id),
-          ne(bookings.status, "completed")
+          inArray(bookings.status, activeStatuses)
         )
       )
       .limit(1);
@@ -65,20 +68,36 @@ export async function POST(request: Request) {
     if (existingActiveBookings.length > 0) {
       return NextResponse.json(
         {
-          error: "You already have an active charging booking. Complete it before requesting a new one.",
+          error: "You already have an active charging session. Complete it before requesting a new one.",
           bookingId: existingActiveBookings[0].id,
         },
         { status: 400 }
       );
     }
 
-    // 4. Create booking request
+    // Validate that the driver exists in the users table
+    const [driver] = await db
+      .select({ id: users.id })
+      .from(users)
+      .where(eq(users.id, user.id))
+      .limit(1);
+    if (!driver) {
+      // Auto-create the user if they don't exist (common with Supabase Auth)
+      await db.insert(users).values({
+        id: user.id,
+        email: user.email || `${user.id}@auto-created.local`,
+      });
+    }
+
+    // 4. Create booking request with 10-minute hold timer
+    const holdExpiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 min from now
     const [newBooking] = await db
       .insert(bookings)
       .values({
         chargerId: charger.id,
         driverId: user.id,
         status: "pending_host_accept",
+        holdExpiresAt,
       })
       .returning();
 

@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { createSupabaseServerClient } from "@/lib/supabase/server-client";
 import { db } from "@/lib/db";
 import { bookings, chargers } from "@/lib/schema";
-import { eq } from "drizzle-orm";
+import { eq, and, lt } from "drizzle-orm";
 
 // ── GET /api/bookings/[id]/status ──
 // Lightweight status-only endpoint. Used for manual refresh checks.
@@ -28,6 +28,7 @@ export async function GET(
         status: bookings.status,
         driverId: bookings.driverId,
         hostId: chargers.hostId,
+        holdExpiresAt: bookings.holdExpiresAt,
       })
       .from(bookings)
       .innerJoin(chargers, eq(bookings.chargerId, chargers.id))
@@ -36,6 +37,20 @@ export async function GET(
 
     if (!booking) {
       return NextResponse.json({ error: "Booking not found." }, { status: 404 });
+    }
+
+    // Auto-cancel expired hold-timer bookings (10-min window passed without host acceptance)
+    if (
+      booking.status === "pending_host_accept" &&
+      booking.holdExpiresAt &&
+      new Date(booking.holdExpiresAt) < new Date()
+    ) {
+      await db
+        .update(bookings)
+        .set({ status: "cancelled", endedAt: new Date() })
+        .where(and(eq(bookings.id, id), eq(bookings.status, "pending_host_accept")));
+
+      return NextResponse.json({ status: "cancelled", holdExpired: true }, { status: 200 });
     }
 
     const isDriver = booking.driverId === user.id;
@@ -49,6 +64,8 @@ export async function GET(
     const effectiveStatus =
       booking.status === "awaiting_handshake"
         ? "awaiting_driver_arrival"
+        : booking.status === "verified"
+        ? "active"
         : booking.status;
 
     return NextResponse.json({ status: effectiveStatus }, { status: 200 });

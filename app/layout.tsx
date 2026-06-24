@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { headers } from "next/headers";
+import Script from "next/script";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -41,7 +42,21 @@ export default async function RootLayout({
       <head>
         {/* Ensure theme is set before React hydrates to avoid flash. Uses cookie so
             server and client can agree on the initial value. */}
-        <script dangerouslySetInnerHTML={{ __html: setThemeScript }} />
+        <Script id="theme-init" strategy="beforeInteractive">{`
+(function(){
+    try {
+      var m = document.cookie.match(new RegExp('(^|; )' + 'theme' + '=([^;]*)'));
+      var stored = m ? decodeURIComponent(m[2]) : null;
+      if (stored === 'light' || stored === 'dark') {
+        document.documentElement.setAttribute('data-theme', stored);
+      } else if (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) {
+        document.documentElement.setAttribute('data-theme', 'dark');
+      } else {
+        document.documentElement.setAttribute('data-theme', 'light');
+      }
+    } catch (e) {}
+  })();
+        `}</Script>
         <link rel="preconnect" href="https://fonts.googleapis.com" />
         <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
         <link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=DM+Sans:wght@300..700&display=swap" rel="stylesheet" />

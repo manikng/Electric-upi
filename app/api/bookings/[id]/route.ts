@@ -1,9 +1,10 @@
 import { NextResponse } from "next/server";
 import { createSupabaseServerClient } from "@/lib/supabase/server-client";
 import { db } from "@/lib/db";
-import { bookings, chargers, users } from "@/lib/schema";
-import { eq } from "drizzle-orm";
+import { bookings, chargers, users, payments } from "@/lib/schema";
+import { eq, desc } from "drizzle-orm";
 import { aliasedTable } from "drizzle-orm";
+import { computeCost, effectiveBillingStatus } from "@/lib/billing";
 
 // ── GET /api/bookings/[id] ──
 // Retrieve detailed information about a booking.
@@ -15,7 +16,6 @@ export async function GET(
   try {
     const { id } = await params;
 
-    // 1. Verify user session
     const supabase = await createSupabaseServerClient();
     const {
       data: { user },
@@ -25,8 +25,6 @@ export async function GET(
       return NextResponse.json({ error: "Unauthorized. Please sign in." }, { status: 401 });
     }
 
-    // 2. Fetch booking joined with charger + driver + host in a single query.
-    //    Alias the users table twice: once for driver, once for host.
     const driverUsers = aliasedTable(users, "driver_users");
     const hostUsers = aliasedTable(users, "host_users");
 
@@ -34,34 +32,34 @@ export async function GET(
       .select({
         bookingId: bookings.id,
         status: bookings.status,
-        // New OTP fields
         secretCode: bookings.secretCode,
         codeExpiresAt: bookings.codeExpiresAt,
         codeUsed: bookings.codeUsed,
-        // Legacy nonce fields — old rows stored verification code here
         nonce: bookings.nonce,
         nonceExpiresAt: bookings.nonceExpiresAt,
         nonceUsed: bookings.nonceUsed,
-        // Timestamps and billing
+        holdExpiresAt: bookings.holdExpiresAt,
         createdAt: bookings.createdAt,
         startedAt: bookings.startedAt,
         endedAt: bookings.endedAt,
         energyKwh: bookings.energyKwh,
-        // Charger info
+        billingStatus: bookings.billingStatus,
+        energySource: bookings.energySource,
+        autoEnergyKwh: bookings.autoEnergyKwh,
+        finalAmount: bookings.finalAmount,
+        billingFinalizedAt: bookings.billingFinalizedAt,
         chargerId: chargers.id,
         title: chargers.title,
         address: chargers.address,
         city: chargers.city,
         pricePerKwh: chargers.pricePerKwh,
+        powerKw: chargers.powerKw,
         chargerType: chargers.chargerType,
         plugType: chargers.plugType,
-        // Ownership
         hostId: chargers.hostId,
         driverId: bookings.driverId,
-        // Driver info (aliased join)
         driverEmail: driverUsers.email,
         driverName: driverUsers.fullName,
-        // Host info (aliased join — no extra query needed)
         hostEmail: hostUsers.email,
         hostName: hostUsers.fullName,
       })
@@ -76,7 +74,6 @@ export async function GET(
       return NextResponse.json({ error: "Booking not found." }, { status: 404 });
     }
 
-    // 3. Authorization Guard
     const isDriver = bookingDetails.driverId === user.id;
     const isHost = bookingDetails.hostId === user.id;
 
@@ -84,23 +81,48 @@ export async function GET(
       return NextResponse.json({ error: "Forbidden. You are not a party to this booking." }, { status: 403 });
     }
 
-    // 4. Normalize: old rows used nonce+awaiting_handshake, new rows use secretCode+awaiting_driver_arrival.
-    //    Both represent the same business concept. Normalize during reads so frontend never sees the split.
     const effectiveCode = bookingDetails.secretCode ?? bookingDetails.nonce;
     const effectiveExpiry = bookingDetails.codeExpiresAt ?? bookingDetails.nonceExpiresAt;
     const effectiveUsed = bookingDetails.codeUsed || bookingDetails.nonceUsed || false;
     const effectiveStatus =
       bookingDetails.status === "awaiting_handshake"
         ? "awaiting_driver_arrival"
+        : bookingDetails.status === "verified"
+        ? "active"
         : bookingDetails.status;
 
-    // 5. Calculate cost if energy metrics exist
-    const price = parseFloat(bookingDetails.pricePerKwh);
-    const energy = bookingDetails.energyKwh ? parseFloat(bookingDetails.energyKwh) : 0;
-    const cost = price * energy;
+    const billingStatus = effectiveBillingStatus(
+      bookingDetails.status,
+      bookingDetails.billingStatus,
+      bookingDetails.energyKwh
+    );
 
-    // 6. Return flat shape — same keys all frontend consumers already reference.
-    //    Driver receives the code; host receives null (they enter it manually, not read from API).
+    const price = parseFloat(bookingDetails.pricePerKwh);
+    const powerKw = bookingDetails.powerKw ? parseFloat(bookingDetails.powerKw) : null;
+    const energy = bookingDetails.energyKwh ? parseFloat(bookingDetails.energyKwh) : 0;
+    const autoEnergy = bookingDetails.autoEnergyKwh ? parseFloat(bookingDetails.autoEnergyKwh) : null;
+
+    let cost: number | null = null;
+    if (billingStatus === "finalized" && bookingDetails.finalAmount) {
+      cost = parseFloat(bookingDetails.finalAmount);
+    } else if (energy > 0) {
+      cost = computeCost(energy, price);
+    }
+
+    const [latestPayment] = await db
+      .select({
+        status: payments.status,
+        amount: payments.amount,
+        paidAt: payments.paidAt,
+      })
+      .from(payments)
+      .where(eq(payments.bookingId, id))
+      .orderBy(desc(payments.createdAt))
+      .limit(1);
+
+    const paymentStatus = latestPayment?.status ?? null;
+    const isPaid = paymentStatus === "simulated_paid";
+
     return NextResponse.json({
       booking: {
         id: bookingDetails.bookingId,
@@ -108,17 +130,26 @@ export async function GET(
         secretCode: isDriver ? effectiveCode : null,
         codeExpiresAt: effectiveExpiry,
         codeUsed: effectiveUsed,
+        holdExpiresAt: bookingDetails.holdExpiresAt,
         createdAt: bookingDetails.createdAt,
         startedAt: bookingDetails.startedAt,
         endedAt: bookingDetails.endedAt,
         energyKwh: bookingDetails.energyKwh ? parseFloat(bookingDetails.energyKwh) : null,
-        cost: cost > 0 ? parseFloat(cost.toFixed(2)) : null,
+        autoEnergyKwh: autoEnergy,
+        energySource: bookingDetails.energySource,
+        billingStatus,
+        finalAmount: bookingDetails.finalAmount ? parseFloat(bookingDetails.finalAmount) : null,
+        billingFinalizedAt: bookingDetails.billingFinalizedAt,
+        cost,
+        paymentStatus,
+        isPaid,
         charger: {
           id: bookingDetails.chargerId,
           title: bookingDetails.title,
           address: bookingDetails.address,
           city: bookingDetails.city,
           pricePerKwh: price,
+          powerKw,
           chargerType: bookingDetails.chargerType,
           plugType: bookingDetails.plugType,
         },
@@ -139,4 +170,3 @@ export async function GET(
     return NextResponse.json({ error: "Internal server error" }, { status: 500 });
   }
 }
-

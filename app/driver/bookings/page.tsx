@@ -105,7 +105,7 @@ const S = {
     } else if (status === "awaiting_driver_arrival") {
       bg = "#dbeafe";
       color = "#1d4ed8";
-    } else if (status === "verified" || status === "charging") {
+    } else if (status === "verified" || status === "active" || status === "charging") {
       bg = "#dcfce7";
       color = "#15803d";
     } else if (status === "completed") {
@@ -255,11 +255,8 @@ export default function DriverBookingsPage() {
           </div>
         ) : (
           bookingsList.map((booking) => {
-            // Only calculate cost for completed sessions with real energy data
-            const isCompleted = booking.status === "completed" && booking.energyKwh;
-            const price = parseFloat(booking.pricePerKwh);
-            const energy = isCompleted ? parseFloat(booking.energyKwh) : null;
-            const cost = isCompleted ? price * energy! : null;
+            const isCompleted = booking.status === "completed";
+            const showCost = isCompleted && booking.billingStatus === "finalized" && booking.cost != null;
 
             return (
               <div key={booking.id} style={S.card}>
@@ -275,9 +272,14 @@ export default function DriverBookingsPage() {
 
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "12px", borderTop: "1px solid #f0ede6", paddingTop: "14px" }}>
                   <div>
-                    {isCompleted ? (
+                    {showCost ? (
                       <span style={{ fontSize: "13px", color: "#6e6b63" }}>
-                        Charged <strong>{energy} kWh</strong> for <strong>₹{cost!.toFixed(2)}</strong> on {new Date(booking.createdAt).toLocaleDateString()}
+                        Charged <strong>{booking.energyKwh} kWh</strong> for <strong>₹{booking.cost!.toFixed(2)}</strong>
+                        {booking.isPaid ? " · Paid" : " · Awaiting payment"}
+                      </span>
+                    ) : isCompleted ? (
+                      <span style={{ fontSize: "13px", color: "#6e6b63" }}>
+                        Session ended — host confirming bill
                       </span>
                     ) : (
                       <span style={{ fontSize: "13px", color: "#6e6b63" }}>

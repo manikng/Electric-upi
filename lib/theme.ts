@@ -126,7 +126,7 @@ const S = {
     } else if (status === "awaiting_driver_arrival") {
       bg = "#dbeafe";
       color = "#1d4ed8";
-    } else if (status === "verified" || status === "charging") {
+    } else if (status === "verified" || status === "active" || status === "charging") {
       bg = "#dcfce7";
       color = "#15803d";
     } else if (status === "completed") {
