@@ -2,7 +2,7 @@
 
 import React from "react";
 import { MapPin, Zap, Building2, Plug, Hash } from "lucide-react";
-import { ChargingSiteResult } from "@/app/api/charging-sites/route";
+import { ChargingSiteResult } from "@/lib/types";
 
 interface ChargingSiteCardProps {
   site: ChargingSiteResult;
@@ -14,6 +14,11 @@ const ChargingSiteCard = React.memo(function ChargingSiteCard({ site, onClick }:
     site.ownership.toLowerCase() === "government"
       ? "var(--color-info)"
       : "var(--color-accent)";
+
+  const distanceText =
+    site.distanceKm !== null && site.distanceKm !== undefined
+      ? `${Number(site.distanceKm ?? 0).toFixed(1)} km away`
+      : null;
 
   return (
     <article
@@ -134,6 +139,11 @@ const ChargingSiteCard = React.memo(function ChargingSiteCard({ site, onClick }:
           }}
         >
           {site.location}
+          {distanceText && (
+            <span style={{ color: "var(--color-primary)", fontWeight: 600 }}>
+              {" "}· {distanceText}
+            </span>
+          )}
         </span>
       </div>
 

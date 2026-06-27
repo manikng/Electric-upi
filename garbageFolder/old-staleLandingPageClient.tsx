@@ -219,7 +219,7 @@ interface LandingPageProps {
 
 export default function LandingPageClient({ initialUser }: LandingPageProps) {
   const [user, setUser] = useState<User | null>(initialUser);
-  const [theme, setTheme] = useState<"dark" | "light">("dark");
+  const [theme, setTheme] = useState<"dark" | "light">("light");
   const [activeCategory, setActiveCategory] = useState("All");
   const [favorites, setFavorites] = useState<string[]>(["charger-3"]); // Mock initial favorite
   const [searchQuery, setSearchQuery] = useState("");

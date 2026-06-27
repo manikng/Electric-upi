@@ -44,6 +44,7 @@ const ChargingMap = dynamic(() => import("@/components/ChargingMap"), {
   ),
 });
 
+
 // Skeleton fallbacks for Suspense boundaries — keeps the page responsive
 // while the heavy sections (map, listings, sites) hydrate.
 const MapSkeleton = () => (
@@ -243,6 +244,20 @@ export default function LandingPageClient({ initialUser = null }: LandingPagePro
     page,
   });
 
+  // ----
+  //toggle nearby me button 
+ const toggleGeolocate = useCallback(() => {
+      if (userCoords) {
+        // Turn off: clear coordinates
+        setUserCoords(null);
+        setLocationError("");
+      } else {
+        // Turn on: request location
+        handleGeolocate();
+      }
+    }, [userCoords, handleGeolocate, setUserCoords, setLocationError]);
+
+
   const handleSearchSubmit = useCallback((value: string) => {
     setSubmittedQuery(value);
     setPage(1); // Reset to first page on new search
@@ -313,6 +328,11 @@ export default function LandingPageClient({ initialUser = null }: LandingPagePro
         if (submittedQuery.trim()) {
           params.append("q", submittedQuery.trim());
         }
+        if (userCoords) {
+          params.append("lat", userCoords.lat.toString());
+          params.append("lng", userCoords.lng.toString());
+          params.append("radius", "200");
+        }
         const url = `/api/charging-sites?${params.toString()}`;
         const res = await fetch(url);
         if (res.ok && active) {
@@ -329,12 +349,12 @@ export default function LandingPageClient({ initialUser = null }: LandingPagePro
         if (active) setChargingSitesLoading(false);
       }
     }
-
+   
     fetchChargingSites();
     return () => {
       active = false;
     };
-  }, [submittedQuery]);
+  }, [submittedQuery, userCoords]);
 
   return (
     <div className="flex flex-col min-h-screen">
@@ -379,7 +399,7 @@ export default function LandingPageClient({ initialUser = null }: LandingPagePro
             <a href="#find" className="btn btn-primary">
               Find Charging
             </a>
-            
+
             {user && (
               <>
                 <Link href="/host/bookings" className="btn btn-ghost">
@@ -390,7 +410,7 @@ export default function LandingPageClient({ initialUser = null }: LandingPagePro
                 </Link>
               </>
             )}
-            
+
             {user ? (
               <button onClick={handleSignOut} className="btn btn-ghost">
                 Sign Out
@@ -639,30 +659,30 @@ export default function LandingPageClient({ initialUser = null }: LandingPagePro
             </div>
           )}
 
-{/* FilterBar component */}
-      <FilterBar
-        searchQuery={searchQuery}
-        onSearchChange={setSearchQuery}
-        onSearchSubmit={handleSearchSubmit}
-        isSearching={loading}
-        filterType={filterType}
-        onFilterTypeChange={setFilterType}
-        sortOrder={sortOrder}
-        onSortOrderChange={setSortOrder}
-        userCoords={userCoords}
-        onGeolocate={handleGeolocate}
-        onReset={() => {
-          setSearchQuery("");
-          setSubmittedQuery("");
-          setFilterType("All Types");
-          setSortOrder("Nearest First");
-          setUserCoords(null);
-          setLocationError("");
-          setRadius(50);
-          setMaxPrice("");
-          setPlugTypes([]);
-        }}
-      />
+          {/* FilterBar component */}
+          <FilterBar
+            searchQuery={searchQuery}
+            onSearchChange={setSearchQuery}
+            onSearchSubmit={handleSearchSubmit}
+            isSearching={loading}
+            filterType={filterType}
+            onFilterTypeChange={setFilterType}
+            sortOrder={sortOrder}
+            onSortOrderChange={setSortOrder}
+            userCoords={userCoords}
+            onGeolocate={toggleGeolocate}
+            onReset={() => {
+              setSearchQuery("");
+              setSubmittedQuery("");
+              setFilterType("All Types");
+              setSortOrder("Nearest First");
+              setUserCoords(null);
+              setLocationError("");
+              setRadius(50);
+              setMaxPrice("");
+              setPlugTypes([]);
+            }}
+          />
 
           <div className="listings-meta">
             <p className="listings-count">
@@ -855,7 +875,7 @@ export default function LandingPageClient({ initialUser = null }: LandingPagePro
         </div>
       </section>
 
-            {/* ─── HOW IT WORKS CAROUSEL ─── */}
+      {/* ─── HOW IT WORKS CAROUSEL ─── */}
       <section className="journey-section" aria-labelledby="journey-heading">
         <div className="section-header fade-in">
           <div className="section-eyebrow">How It Works</div>

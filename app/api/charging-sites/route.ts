@@ -1,31 +1,8 @@
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { sql } from "drizzle-orm";
-
-// ── Types ──
-export interface ConnectorProfile {
-  id: string;
-  connectorType: string | null;
-  chargerRatingKw: number | null;
-  connectorRatingKw: number | null;
-  connectorCount: number | null;
-}
-
-export interface ChargingSiteResult {
-  id: string;
-  cpoName: string;
-  ownership: string;
-  state: string;
-  district: string;
-  cityVillage: string;
-  location: string;
-  latitude: number;
-  longitude: number;
-  source: string | null;
-  connectorProfiles: ConnectorProfile[];
-  connectorSummary: string;
-  totalConnectors: number;
-}
+import {getHaversineDistance} from "@/app/api/chargers/route";
+import { ChargingSiteResult, ConnectorProfile } from "@/lib/types";
 
 interface SearchResponse {
   data: ChargingSiteResult[];
@@ -46,6 +23,17 @@ export async function GET(request: Request) {
     const pageLimit = Math.min(50, Math.max(1, parseInt(limitParam || "20", 10) || 20));
     const offset = (page - 1) * pageLimit;
     const fetchLimit = pageLimit + 1;
+
+    // Parse user location for distance calculation
+    const latParam = searchParams.get("lat");
+    const lngParam = searchParams.get("lng");
+    const userLat = latParam ? parseFloat(latParam) : null;
+    const userLng = lngParam ? parseFloat(lngParam) : null;
+    const hasUserLocation = userLat !== null && userLng !== null && !isNaN(userLat) && !isNaN(userLng);
+
+    // Parse radius (km) for proximity filtering
+    const radiusParam = searchParams.get("radius");
+    const radiusKm = hasUserLocation && radiusParam ? Math.max(1, parseFloat(radiusParam) || 200) : null;
 
     // ── Build dynamic WHERE fragments using Drizzle sql template ──
     const whereFragments: ReturnType<typeof sql>[] = [];
@@ -121,7 +109,7 @@ export async function GET(request: Request) {
     }
 
     // Build response with connector summaries
-    const data: ChargingSiteResult[] = sitesToMap.map((site: any) => {
+    let data: ChargingSiteResult[] = sitesToMap.map((site: any) => {
       const profiles = connectorProfilesMap[site.id] || [];
       const totalConnectors = profiles.reduce(
         (sum, p) => sum + (p.connectorCount || 0),
@@ -134,6 +122,11 @@ export async function GET(request: Request) {
         typeCount > 0
           ? `${typeCount} Type${typeCount > 1 ? "s" : ""} • ${totalConnectors} Connector${totalConnectors !== 1 ? "s" : ""}`
           : "No connector info";
+
+      // Calculate distance if user location is available
+      const distanceKm = hasUserLocation && site.latitude && site.longitude
+        ? getHaversineDistance(userLat!, userLng!, Number(site.latitude), Number(site.longitude))
+        : null;
 
       return {
         id: site.id,
@@ -149,8 +142,23 @@ export async function GET(request: Request) {
         connectorProfiles: profiles,
         connectorSummary,
         totalConnectors,
+        distanceKm,
       };
     });
+
+    // Filter by radius if user location is available
+    if (hasUserLocation && radiusKm !== null) {
+      data = data.filter((site) => (site.distanceKm ?? Infinity) <= radiusKm);
+    }
+
+    // Sort by distance when user location is available, otherwise keep alphabetical
+    if (hasUserLocation) {
+      data.sort((a, b) => {
+        const distA = a.distanceKm ?? Infinity;
+        const distB = b.distanceKm ?? Infinity;
+        return distA - distB;
+      });
+    }
 
     return NextResponse.json({
       data,

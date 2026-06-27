@@ -64,4 +64,5 @@ export interface ChargingSiteResult {
   connectorProfiles: ConnectorProfile[];
   connectorSummary: string;
   totalConnectors: number;
+  distanceKm?: number | null;
 }

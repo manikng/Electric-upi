@@ -12,7 +12,7 @@ if (!connectionString) {
 // with Supabase transaction-mode pooler URLs.
 const poolConfig: PoolConfig = {
   connectionString,
-  max: 30,
+  max: 30,//but supabase free tier allows only v
   idleTimeoutMillis: 60_000,
   connectionTimeoutMillis: 15_000,
   keepAlive: true,
