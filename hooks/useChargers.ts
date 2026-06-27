@@ -96,13 +96,10 @@ export function useChargers({
       }
     }
 
-    const delayDebounce = setTimeout(() => {
-      fetchChargers();
-    }, 300);
+    fetchChargers();
 
     return () => {
       active = false;
-      clearTimeout(delayDebounce);
     };
   }, [searchQuery, userCoords, filterType, page, radius, maxPrice, plugTypes]);
 

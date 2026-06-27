@@ -31,7 +31,7 @@ export default function ChargerCard({
   ];
 
   // Fallback image URL — placeholder when charger.imageUrl is null/undefined
-  const placeholderImageUrl = "/placeholder-ev-station.png";
+  const placeholderImageUrl = "/placeholder-ev-station.svg";
 
   return (
     <Link

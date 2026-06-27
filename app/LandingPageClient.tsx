@@ -200,6 +200,7 @@ interface LandingPageProps {
 export default function LandingPageClient({ initialUser = null }: LandingPageProps = {}) {
   const [activeCategory, setActiveCategory] = useState("All");
   const [searchQuery, setSearchQuery] = useState("");
+  const [submittedQuery, setSubmittedQuery] = useState("");
   const [filterType, setFilterType] = useState("All Types");
   const [sortOrder, setSortOrder] = useState("Nearest First");
   const [carouselIndex, setCarouselIndex] = useState(0);
@@ -234,7 +235,7 @@ export default function LandingPageClient({ initialUser = null }: LandingPagePro
     getFilteredChargers,
   } = useChargers({
     initialUser,
-    searchQuery,
+    searchQuery: submittedQuery,
     userCoords,
     filterType,
     radius,
@@ -242,6 +243,11 @@ export default function LandingPageClient({ initialUser = null }: LandingPagePro
     plugTypes,
     page,
   });
+
+  const handleSearchSubmit = (value: string) => {
+    setSubmittedQuery(value);
+    setPage(1); // Reset to first page on new search
+  };
 
   // Hero Carousel Auto-play
   useEffect(() => {
@@ -293,7 +299,7 @@ export default function LandingPageClient({ initialUser = null }: LandingPagePro
     setCarouselIndex((prev) => Math.min(maxCarouselIndex, prev + 1));
   };
 
-  // Fetch public charging sites with search/filter based on user's searchQuery
+  // Fetch public charging sites with search/filter based on user's submittedQuery
   useEffect(() => {
     let active = true;
 
@@ -302,8 +308,8 @@ export default function LandingPageClient({ initialUser = null }: LandingPagePro
       try {
         const params = new URLSearchParams();
         params.append("limit", "20");
-        if (searchQuery.trim()) {
-          params.append("q", searchQuery.trim());
+        if (submittedQuery.trim()) {
+          params.append("q", submittedQuery.trim());
         }
         const url = `/api/charging-sites?${params.toString()}`;
         const res = await fetch(url);
@@ -326,7 +332,7 @@ export default function LandingPageClient({ initialUser = null }: LandingPagePro
     return () => {
       active = false;
     };
-  }, [searchQuery]);
+  }, [submittedQuery]);
 
   return (
     <div className="flex flex-col min-h-screen">
@@ -343,7 +349,17 @@ export default function LandingPageClient({ initialUser = null }: LandingPagePro
             </div>
           </Link>
 
-          <div className="nav-search" role="search">
+          <form
+            className="nav-search"
+            role="search"
+            onSubmit={(e) => {
+              e.preventDefault();
+              const trimmed = searchQuery.trim();
+              if (trimmed.length >= 2) {
+                handleSearchSubmit(trimmed);
+              }
+            }}
+          >
             <Search className="w-4 h-4" />
             <input
               type="text"
@@ -352,7 +368,7 @@ export default function LandingPageClient({ initialUser = null }: LandingPagePro
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
             />
-          </div>
+          </form>
 
           <div className="nav-actions">
             <Link href="/list-charger" className="btn btn-outline">
@@ -625,6 +641,8 @@ export default function LandingPageClient({ initialUser = null }: LandingPagePro
       <FilterBar
         searchQuery={searchQuery}
         onSearchChange={setSearchQuery}
+        onSearchSubmit={handleSearchSubmit}
+        isSearching={loading}
         filterType={filterType}
         onFilterTypeChange={setFilterType}
         sortOrder={sortOrder}
@@ -633,6 +651,7 @@ export default function LandingPageClient({ initialUser = null }: LandingPagePro
         onGeolocate={handleGeolocate}
         onReset={() => {
           setSearchQuery("");
+          setSubmittedQuery("");
           setFilterType("All Types");
           setSortOrder("Nearest First");
           setUserCoords(null);
@@ -676,7 +695,7 @@ export default function LandingPageClient({ initialUser = null }: LandingPagePro
           {/* LISTINGS GRID */}
           <Suspense fallback={<ListingsSkeleton />}>
             <SearchListings
-              searchQuery={searchQuery}
+              searchQuery={submittedQuery}
               userCoords={userCoords}
               filterType={filterType}
               sortOrder={sortOrder}
