@@ -39,3 +39,29 @@ export interface SearchResponse {
   page: number;
   hasMore: boolean;
 }
+
+// ─── Charging Sites (Government / Public CPO Data) ───────────────────────────
+
+export interface ConnectorProfile {
+  id: string;
+  connectorType: string | null;
+  chargerRatingKw: number | null;
+  connectorRatingKw: number | null;
+  connectorCount: number;
+}
+
+export interface ChargingSiteResult {
+  id: string;
+  cpoName: string;
+  ownership: string;
+  state: string;
+  district: string;
+  cityVillage: string;
+  location: string;
+  latitude: number;
+  longitude: number;
+  source: string | null;
+  connectorProfiles: ConnectorProfile[];
+  connectorSummary: string;
+  totalConnectors: number;
+}

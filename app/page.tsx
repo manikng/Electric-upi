@@ -1,11 +1,9 @@
-import { createSupabaseServerClient } from "@/lib/supabase/server-client";
 import LandingPageClient from "./LandingPageClient";
 
-export default async function Page() {
-  const supabase = await createSupabaseServerClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-
-  return <LandingPageClient initialUser={user} />;
+// NOTE: We intentionally do NOT await Supabase auth here.
+// The page streams immediately; auth is resolved client-side via useAuth().
+// This avoids blocking the entire landing page on a network round-trip
+// to Supabase (which was a major cause of perceived freeze).
+export default function Page() {
+  return <LandingPageClient />;
 }

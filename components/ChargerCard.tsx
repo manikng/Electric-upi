@@ -1,13 +1,15 @@
 "use client";
 
+import Link from "next/link";
 import { MapPin, ChevronRight } from "lucide-react";
 import { ChargerResult } from "@/lib/types";
+import Image from "next/image";
 
 interface ChargerCardProps {
   charger: ChargerResult;
   bookingLoaderId: string;
   onRequestBooking: (id: string) => void;
-  onClick: (id: string) => void;
+  onClick?: () => void;
 }
 
 export default function ChargerCard({
@@ -18,7 +20,7 @@ export default function ChargerCard({
 }: ChargerCardProps) {
   const distanceText =
     charger.distanceKm !== null && charger.distanceKm !== undefined
-      ? `${charger.distanceKm.toFixed(1)} km away`
+      ? `${Number(charger.distanceKm ?? 0).toFixed(1)} km away`
       : null;
 
   const listAmenities = Array.isArray(charger.amenities) ? charger.amenities : [];
@@ -28,23 +30,38 @@ export default function ChargerCard({
     ...listAmenities.slice(0, 1),
   ];
 
+  // Fallback image URL — placeholder when charger.imageUrl is null/undefined
+  const placeholderImageUrl = "/placeholder-ev-station.png";
+
   return (
-    <article
-      className="listing-card"
-      role="listitem"
-      onClick={() => onClick(charger.id)}
+    <Link
+      href={`/host/chargers/${charger.id}`}
       style={{
-        background: "var(--color-surface-2)",
-        border: "1.5px solid var(--color-border)",
-        borderRadius: "16px",
-        overflow: "hidden",
-        display: "flex",
-        flexDirection: "column",
-        position: "relative",
-        transition: "transform 0.2s ease, box-shadow 0.2s ease",
-        cursor: "pointer",
+        textDecoration: "none",
+        color: "inherit",
+      }}
+      onClick={(event) => {
+        if (onClick) {
+          event.preventDefault();
+          onClick();
+        }
       }}
     >
+      <article
+        className="listing-card"
+        role="listitem"
+        style={{
+          background: "var(--color-surface-2)",
+          border: "1.5px solid var(--color-border)",
+          borderRadius: "16px",
+          overflow: "hidden",
+          display: "flex",
+          flexDirection: "column",
+          position: "relative",
+          transition: "transform 0.2s ease, box-shadow 0.2s ease",
+          cursor: "pointer",
+        }}
+      >
       {/* Image Section */}
       <div
         style={{
@@ -55,28 +72,17 @@ export default function ChargerCard({
           background: "var(--color-surface-offset)",
         }}
       >
-        {charger.imageUrl ? (
-          <img
-            src={charger.imageUrl}
-            alt={charger.title}
-            style={{ width: "100%", height: "100%", objectFit: "cover" }}
-          />
-        ) : (
-          <div
-            style={{
-              width: "100%",
-              height: "100%",
-              background: "linear-gradient(135deg, #1a6b4a 0%, #114932 100%)",
-              color: "white",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              fontSize: "3rem",
-            }}
-          >
-            ⚡
-          </div>
-        )}
+        <Image
+          src={charger.imageUrl || placeholderImageUrl}
+          alt={charger.title || "EV Charging Station"}
+          fill
+          style={{ objectFit: "cover" }}
+          sizes="(max-width: 640px) 100vw, (max-width: 1024px) 50vw, 33vw"
+          onError={(e) => {
+            // Next.js Image handles errors internally, but fallback for parity
+            // This handler is defensive — Next.js v16 handles fallbacks automatically.
+          }}
+        />
       </div>
 
       {/* Details Section */}
@@ -118,7 +124,7 @@ export default function ChargerCard({
             }}
           >
             <span>★</span>
-            <span>{charger.rating ? charger.rating.toFixed(2) : "New"}</span>
+            <span>{charger.rating ? Number(charger.rating).toFixed(2) : "New"}</span>
             {charger.reviewsCount ? (
               <span style={{ color: "var(--color-text-muted)", fontWeight: 400 }}>
                 ({charger.reviewsCount})
@@ -204,7 +210,7 @@ export default function ChargerCard({
         >
           <div>
             <div style={{ fontSize: "16px", fontWeight: 800, color: "var(--color-text)" }}>
-              ₹{charger.pricePerKwh.toFixed(2)}
+              ₹{Number(charger.pricePerKwh ?? 0).toFixed(2)}
               <span
                 style={{
                   fontSize: "11px",
@@ -257,5 +263,6 @@ export default function ChargerCard({
         </div>
       </div>
     </article>
-  );
+  </Link>
+);
 }

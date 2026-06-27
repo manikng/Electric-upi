@@ -178,26 +178,24 @@ export async function GET(request: Request) {
     const hasGeo = lat !== undefined && lng !== undefined;
 
     // ── Count query (for pagination) ──
-    // FIX #2: Added missing closing `)` on ILIKE group
-    // FIX #3: Replaced sql.raw() with proper sql template binding for geo clause
-    const countResult = await db.execute(sql`
-      SELECT COUNT(*) as count
-      FROM chargers c
-      LEFT JOIN users u ON c.host_id = u.id
-      WHERE c.status = 'active'
-      ${q ? sql`AND (c.title ILIKE ${"%" + q.replace(/[%_]/g, "\\$&") + "%"} OR c.address ILIKE ${"%" + q.replace(/[%_]/g, "\\$&") + "%"} OR c.city ILIKE ${"%" + q.replace(/[%_]/g, "\\$&") + "%"}` : sql``}
-      ${maxPrice !== undefined ? sql`AND c.price_per_kwh <= ${maxPrice.toFixed(2)}` : sql``}
-      ${plugTypes && plugTypes.length > 0 ? sql`AND c.plug_type = ANY(${plugTypes})` : sql``}
-      ${chargerType ? sql`AND c.charger_type = ${chargerType}` : sql``}
-      ${hasGeo ? sql`AND ST_DWithin(
-        COALESCE(c.location, ST_SetSRID(ST_MakePoint(c.longitude::float8, c.latitude::float8), 4326)::geography),
-        ST_SetSRID(ST_MakePoint(${lng}, ${lat}), 4326)::geography,
-        ${radius * 1000}
-      )` : sql``}
-    `);
-    const total = Number(countResult.rows[0]?.count ?? 0);
+    // COUNT over chargers only — the LEFT JOIN users was wasted overhead
+const countQuery = sql`
+   SELECT COUNT(*) as count
+   FROM chargers c
+   WHERE c.status = 'active'
+   ${q ? sql`AND (c.title ILIKE ${"%" + q.replace(/[%_]/g, "\\$&") + "%"} OR c.address ILIKE ${"%" + q.replace(/[%_]/g, "\\$&") + "%"} OR c.city ILIKE ${"%" + q.replace(/[%_]/g, "\\$&") + "%"})` : sql``}
+   ${maxPrice !== undefined ? sql`AND c.price_per_kwh <= ${maxPrice.toFixed(2)}` : sql``}
+   ${plugTypes && plugTypes.length > 0 ? sql`AND c.plug_type = ANY(${plugTypes})` : sql``}
+   ${chargerType ? sql`AND c.charger_type = ${chargerType}` : sql``}
+   ${hasGeo ? sql`AND ST_DWithin(
+     COALESCE(c.location, ST_SetSRID(ST_MakePoint(c.longitude::float8, c.latitude::float8), 4326)::geography),
+     ST_SetSRID(ST_MakePoint(${lng}, ${lat}), 4326)::geography,
+     ${radius * 1000}
+   )` : sql``}
+ `;
 
-    // ── Data query with distance calculation ──
+ const countResult = await db.execute(countQuery);
+ const total = Number(countResult.rows[0]?.count ?? 0);
     const offset = (page - 1) * PAGE_SIZE;
     const distanceSelect =
       hasGeo
@@ -211,48 +209,48 @@ export async function GET(request: Request) {
     // FIX #2: Added missing closing `)` on ILIKE group
     // FIX #3: Replaced sql.raw() with proper sql template binding for geo clause
     const dataQuery = sql`
-      SELECT
-        c.id,
-        c.title,
-        c.address,
-        c.city,
-        c.area,
-        c.pincode,
-        c.state,
-        c.price_per_kwh,
-        c.charger_type,
-        c.power_kw,
-        c.plug_type,
-        c.available_from,
-        c.available_to,
-        c.amenities,
-        c.vehicle_segments,
-        c.image_url,
-        c.description,
-        c.latitude,
-        c.longitude,
-        c.created_at,
-        u.full_name AS host_name,
-        u.trust_score AS host_trust_score,
-        ${distanceSelect}
-      FROM chargers c
-      LEFT JOIN users u ON c.host_id = u.id
-      WHERE c.status = 'active'
-      ${q ? sql`AND (c.title ILIKE ${"%" + q.replace(/[%_]/g, "\\$&") + "%"} OR c.address ILIKE ${"%" + q.replace(/[%_]/g, "\\$&") + "%"} OR c.city ILIKE ${"%" + q.replace(/[%_]/g, "\\$&") + "%"}` : sql``}
-      ${maxPrice !== undefined ? sql`AND c.price_per_kwh <= ${maxPrice.toFixed(2)}` : sql``}
-      ${plugTypes && plugTypes.length > 0 ? sql`AND c.plug_type = ANY(${plugTypes})` : sql``}
-      ${chargerType ? sql`AND c.charger_type = ${chargerType}` : sql``}
-      ${hasGeo ? sql`AND ST_DWithin(
-        COALESCE(c.location, ST_SetSRID(ST_MakePoint(c.longitude::float8, c.latitude::float8), 4326)::geography),
-        ST_SetSRID(ST_MakePoint(${lng}, ${lat}), 4326)::geography,
-        ${radius * 1000}
-      )` : sql``}
-      ${hasGeo
-        ? sql`ORDER BY
-        COALESCE(c.location, ST_SetSRID(ST_MakePoint(c.longitude::float8, c.latitude::float8), 4326)::geography) <-> ST_SetSRID(ST_MakePoint(${lng}, ${lat}), 4326)::geography`
-        : sql`ORDER BY c.created_at DESC`}
-      LIMIT ${PAGE_SIZE} OFFSET ${offset}
-    `;
+  SELECT
+    c.id,
+    c.title,
+    c.address,
+    c.city,
+    c.area,
+    c.pincode,
+    c.state,
+    c.price_per_kwh,
+    c.charger_type,
+    c.power_kw,
+    c.plug_type,
+    c.available_from,
+    c.available_to,
+    c.amenities,
+    c.vehicle_segments,
+    c.image_url,
+    c.description,
+    c.latitude,
+    c.longitude,
+    c.created_at,
+    u.full_name AS host_name,
+    u.trust_score AS host_trust_score,
+    ${distanceSelect}
+  FROM chargers c
+  LEFT JOIN users u ON c.host_id = u.id
+  WHERE c.status = 'active'
+  ${q ? sql`AND (c.title ILIKE ${"%" + q.replace(/[%_]/g, "\\$&") + "%"} OR c.address ILIKE ${"%" + q.replace(/[%_]/g, "\\$&") + "%"} OR c.city ILIKE ${"%" + q.replace(/[%_]/g, "\\$&") + "%"})` : sql``}
+  ${maxPrice !== undefined ? sql`AND c.price_per_kwh <= ${maxPrice.toFixed(2)}` : sql``}
+  ${plugTypes && plugTypes.length > 0 ? sql`AND c.plug_type = ANY(${plugTypes})` : sql``}
+  ${chargerType ? sql`AND c.charger_type = ${chargerType}` : sql``}
+  ${hasGeo ? sql`AND ST_DWithin(
+    COALESCE(c.location, ST_SetSRID(ST_MakePoint(c.longitude::float8, c.latitude::float8), 4326)::geography),
+    ST_SetSRID(ST_MakePoint(${lng}, ${lat}), 4326)::geography,
+    ${radius * 1000}
+  )` : sql``}
+  ${hasGeo
+    ? sql`ORDER BY
+    COALESCE(c.location, ST_SetSRID(ST_MakePoint(c.longitude::float8, c.latitude::float8), 4326)::geography) <-> ST_SetSRID(ST_MakePoint(${lng}, ${lat}), 4326)::geography`
+    : sql`ORDER BY c.created_at DESC`}
+  LIMIT ${PAGE_SIZE} OFFSET ${offset}
+`;
 
     const dataResult = await db.execute(dataQuery);
 

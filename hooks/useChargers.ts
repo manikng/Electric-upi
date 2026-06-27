@@ -41,6 +41,7 @@ export function useChargers({
   const [favorites, setFavorites] = useState<string[]>([]);
   const [bookingLoaderId, setBookingLoaderId] = useState("");
   const [bookingError, setBookingError] = useState("");
+  const [fetchError, setFetchError] = useState("");
   const [total, setTotal] = useState(0);
 
   // Fetch chargers from DB with geolocation if enabled
@@ -70,13 +71,26 @@ export function useChargers({
         params.set("page", String(page));
 
         const res = await fetch(`/api/chargers/search?${params.toString()}`);
+        if (!res.ok && active) {
+          // Don't leave the page in a permanent loading state on backend failure
+          setFetchError(`Search failed (${res.status}). Please try again.`);
+          setDbChargers([]);
+          setTotal(0);
+          return;
+        }
         if (res.ok && active) {
           const data: SearchResponse = await res.json();
           setDbChargers(data.data || []);
           setTotal(data.total);
+          setFetchError("");
         }
       } catch (err) {
         console.error("Failed to fetch chargers:", err);
+        if (active) {
+          setFetchError("Network error. Check your connection.");
+          setDbChargers([]);
+          setTotal(0);
+        }
       } finally {
         if (active) setLoading(false);
       }
@@ -145,6 +159,8 @@ export function useChargers({
     return dbChargers;
   }, [dbChargers]);
 
+  const clearFetchError = useCallback(() => setFetchError(""), []);
+
   return {
     dbChargers,
     loading,
@@ -152,6 +168,8 @@ export function useChargers({
     bookingLoaderId,
     bookingError,
     setBookingError,
+    fetchError,
+    clearFetchError,
     total,
     setTotal,
     toggleFavorite,

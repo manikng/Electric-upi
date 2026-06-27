@@ -1,4 +1,4 @@
-import { pgTable, uuid, text, decimal, integer, timestamp, boolean, geometry } from "drizzle-orm/pg-core";
+import { pgTable, uuid, text, decimal, integer, timestamp, boolean, geometry, jsonb  } from "drizzle-orm/pg-core";
 import { relations, sql } from "drizzle-orm";
 
 // 1. Users Table
@@ -36,15 +36,49 @@ export const chargers = pgTable("chargers", {
   longitude: decimal("longitude", { precision: 10, scale: 7 }),
   location: geometry("location", { type: "point", mode: "xy", srid: 4326 }),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+  site_type: text("site_type").default("home"), // home | commercial | public
 });
 
-// 3. Bookings Table
+// 3. Public Charging Sites (EV PCS data from govt sources)
+export const chargingSites = pgTable("charging_sites", {
+  id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+  cpoName: text("cpo_name").notNull(), // CPO Name
+  ownership: text("ownership").notNull(), // Govt/Private
+  state: text("state").notNull(),
+  district: text("district").notNull(),
+  cityVillage: text("city_village").notNull(),
+  location: text("location").notNull(), // address text
+  latitude: decimal("latitude", { precision: 10, scale: 7 }).notNull(),
+  longitude: decimal("longitude", { precision: 10, scale: 7 }).notNull(),
+  location_geom:geometry("location_geom", { type: "point", mode: "xy", srid: 4326 }),
+  source: text("source"), // source PDF or file
+  rawSource: jsonb("raw_source"),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true })
+    .defaultNow()
+    .notNull()
+    .$onUpdateFn(() => new Date()),
+});
+
+// 4. Site Connector Profiles — one row per connector-type profile per site
+export const siteConnectorProfiles = pgTable("site_connector_profiles", {
+  id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+  siteId: uuid("site_id").references(() => chargingSites.id, { onDelete: "cascade" }).notNull(),
+  connectorType: text("connector_type").notNull(), // Types of Chargers Installed/ Connector
+  chargerRatingKw: decimal("charger_rating_kw", { precision: 6, scale: 2 }), // Charger Rating
+  connectorRatingKw: decimal("connector_rating_kw", { precision: 6, scale: 2 }), // Connector Rating
+  connectorCount: integer("connector_count"), // No. of Connector
+   rawSource: jsonb("raw_source"),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
+});
+
+// 5. Bookings Table
 export const bookings = pgTable("bookings", {
   id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
   chargerId: uuid("charger_id").references(() => chargers.id, { onDelete: "cascade" }).notNull(),
   driverId: uuid("driver_id").references(() => users.id, { onDelete: "cascade" }).notNull(),
-  status: text("status").default("pending_host_accept"),
-  // pending_host_accept → awaiting_driver_arrival → active → charging → completed
+  status: text("status").default("pending_host_accept"), // pending_host_accept → awaiting_driver_arrival → active → charging → completed
   // legacy secretCode fields (kept for backward compatibility)
   secretCode: text("secret_code"),
   codeExpiresAt: timestamp("code_expires_at", { withTimezone: true }),
@@ -71,7 +105,7 @@ export const bookings = pgTable("bookings", {
   billingFinalizedAt: timestamp("billing_finalized_at", { withTimezone: true }),
 });
 
-// 4. Payments Table
+// 6. Payments Table
 export const payments = pgTable("payments", {
   id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
   bookingId: uuid("booking_id").references(() => bookings.id, { onDelete: "cascade" }).notNull(),
@@ -87,30 +121,24 @@ export const usersRelations = relations(users, ({ many }) => ({
   chargers: many(chargers),
   bookings: many(bookings),
 }));
-
 export const chargersRelations = relations(chargers, ({ one, many }) => ({
-  host: one(users, {
-    fields: [chargers.hostId],
-    references: [users.id],
-  }),
+  host: one(users, { fields: [chargers.hostId], references: [users.id] }),
   bookings: many(bookings),
 }));
-
+export const chargingSitesRelations = relations(chargingSites, ({ many }) => ({
+  connectorProfiles: many(siteConnectorProfiles),
+}));
+export const siteConnectorProfilesRelations = relations(siteConnectorProfiles, ({ one }) => ({
+  site: one(chargingSites, { fields: [siteConnectorProfiles.siteId], references: [chargingSites.id] }),
+}));
 export const bookingsRelations = relations(bookings, ({ one, many }) => ({
-  charger: one(chargers, {
-    fields: [bookings.chargerId],
-    references: [chargers.id],
-  }),
-  driver: one(users, {
-    fields: [bookings.driverId],
-    references: [users.id],
-  }),
+  charger: one(chargers, { fields: [bookings.chargerId], references: [chargers.id] }),
+  driver: one(users, { fields: [bookings.driverId], references: [users.id] }),
   payments: many(payments),
 }));
-
 export const paymentsRelations = relations(payments, ({ one }) => ({
-  booking: one(bookings, {
-    fields: [payments.bookingId],
-    references: [bookings.id],
-  }),
+  booking: one(bookings, { fields: [payments.bookingId], references: [bookings.id] }),
 }));
+
+
+

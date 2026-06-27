@@ -11,5 +11,6 @@ export default {
     '!spatial_ref_sys',   // PostGIS system table — never touch
     '!geography_columns',  // PostGIS view
     '!geometry_columns',   // PostGIS view
+    
   ],
 } satisfies Config;

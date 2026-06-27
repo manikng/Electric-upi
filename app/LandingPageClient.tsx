@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, Suspense } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { User } from "@supabase/supabase-js";
@@ -27,10 +27,92 @@ import { useGeolocation } from "@/hooks/useGeolocation";
 import { useAuth } from "@/hooks/useAuth";
 import { useTheme } from "@/hooks/useTheme";
 import { ChargerResult, SearchResponse } from "@/lib/types";
+import { ChargingSiteResult } from "@/lib/types";
 
 // Import components
 import FilterBar from "@/components/FilterBar";
 import SearchListings from "@/components/SearchListings";
+import ChargerMap from "@/components/ChargerMap";
+import ChargingSiteCard from "@/components/ChargingSiteCard";
+import dynamic from "next/dynamic";
+
+const ChargingMap = dynamic(() => import("@/components/ChargingMap"), {
+  ssr: false,
+  loading: () => (
+    <div style={{ height: 480, display: "flex", alignItems: "center", justifyContent: "center", background: "var(--color-surface)", borderRadius: "var(--radius-xl)" }}>
+      <span style={{ color: "var(--color-muted)" }}>Loading map…</span>
+    </div>
+  ),
+});
+
+// Skeleton fallbacks for Suspense boundaries — keeps the page responsive
+// while the heavy sections (map, listings, sites) hydrate.
+const MapSkeleton = () => (
+  <div
+    style={{
+      height: 480,
+      display: "flex",
+      alignItems: "center",
+      justifyContent: "center",
+      background: "var(--color-surface)",
+      borderRadius: "var(--radius-xl)",
+      border: "1.5px solid var(--color-border)",
+    }}
+    aria-hidden="true"
+  >
+    <span style={{ color: "var(--color-muted)" }}>Loading map…</span>
+  </div>
+);
+
+const ListingsSkeleton = () => (
+  <div
+    className="listings-grid"
+    role="list"
+    aria-label="EV charger listings"
+    aria-busy="true"
+  >
+    {Array.from({ length: 6 }).map((_, i) => (
+      <div
+        key={i}
+        className="animate-pulse"
+        style={{
+          background: "var(--color-surface-2)",
+          height: "360px",
+          borderRadius: "16px",
+          border: "1.5px solid var(--color-border)",
+          boxShadow: "0 2px 8px rgba(0,0,0,0.04)",
+        }}
+      />
+    ))}
+  </div>
+);
+
+const SitesSkeleton = () => (
+  <div
+    style={{
+      display: "grid",
+      gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))",
+      gap: "var(--space-4)",
+      marginBottom: "var(--space-12)",
+    }}
+    role="list"
+    aria-label="Public EV charging sites"
+    aria-busy="true"
+  >
+    {Array.from({ length: 8 }).map((_, i) => (
+      <div
+        key={i}
+        className="animate-pulse"
+        style={{
+          background: "var(--color-surface-2)",
+          height: "240px",
+          borderRadius: "16px",
+          border: "1.5px solid var(--color-border)",
+        }}
+      />
+    ))}
+  </div>
+);
 
 const HERO_SLIDES = [
   {
@@ -112,10 +194,10 @@ const JOURNEY_STEPS = [
 ];
 
 interface LandingPageProps {
-  initialUser: User | null;
+  initialUser?: User | null;
 }
 
-export default function LandingPageClient({ initialUser }: LandingPageProps) {
+export default function LandingPageClient({ initialUser = null }: LandingPageProps = {}) {
   const [activeCategory, setActiveCategory] = useState("All");
   const [searchQuery, setSearchQuery] = useState("");
   const [filterType, setFilterType] = useState("All Types");
@@ -127,8 +209,10 @@ export default function LandingPageClient({ initialUser }: LandingPageProps) {
   const [maxPrice, setMaxPrice] = useState("");
   const [plugTypes, setPlugTypes] = useState<string[]>([]);
   const [page, setPage] = useState(1);
+  const [selectedChargerId, setSelectedChargerId] = useState<string | null>(null);
+  const [chargingSites, setChargingSites] = useState<ChargingSiteResult[]>([]);
+  const [chargingSitesLoading, setChargingSitesLoading] = useState(false);
 
-  const heroCarouselRef = useRef<HTMLDivElement>(null);
   const autoPlayRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const router = useRouter();
 
@@ -208,6 +292,41 @@ export default function LandingPageClient({ initialUser }: LandingPageProps) {
   const slideNext = () => {
     setCarouselIndex((prev) => Math.min(maxCarouselIndex, prev + 1));
   };
+
+  // Fetch public charging sites with search/filter based on user's searchQuery
+  useEffect(() => {
+    let active = true;
+
+    async function fetchChargingSites() {
+      setChargingSitesLoading(true);
+      try {
+        const params = new URLSearchParams();
+        params.append("limit", "20");
+        if (searchQuery.trim()) {
+          params.append("q", searchQuery.trim());
+        }
+        const url = `/api/charging-sites?${params.toString()}`;
+        const res = await fetch(url);
+        if (res.ok && active) {
+          const payload = await res.json();
+          setChargingSites(payload?.data || []);
+        } else if (active) {
+          // Backend may be slow or unavailable — don't block the whole page
+          setChargingSites([]);
+        }
+      } catch (err) {
+        console.error("Failed to fetch charging sites:", err);
+        if (active) setChargingSites([]);
+      } finally {
+        if (active) setChargingSitesLoading(false);
+      }
+    }
+
+    fetchChargingSites();
+    return () => {
+      active = false;
+    };
+  }, [searchQuery]);
 
   return (
     <div className="flex flex-col min-h-screen">
@@ -326,7 +445,7 @@ export default function LandingPageClient({ initialUser }: LandingPageProps) {
 
           {/* HERO CAROUSEL */}
           <div className="hero-carousel-wrapper">
-            <div className="hero-carousel" ref={heroCarouselRef}>
+            <div className="hero-carousel">
               <AnimatePresence initial={false} custom={currentSlide}>
                 {HERO_SLIDES.map((slide, index) => (
                   index === currentSlide && (
@@ -404,6 +523,22 @@ export default function LandingPageClient({ initialUser }: LandingPageProps) {
         </div>
       </section>
 
+      {/* ─── EV CHARGING MAP ─── */}
+      <section className="map-section" id="map" aria-labelledby="map-heading">
+        <div className="section-header fade-in" style={{ textAlign: "center", marginBottom: "var(--space-4)" }}>
+          <div className="section-eyebrow">Explore Stations</div>
+          <h2 className="section-title" id="map-heading">
+            39,000+ Charging Stations Across India
+          </h2>
+          <p className="section-subtitle" style={{ maxWidth: 600, margin: "0 auto" }}>
+            Browse every registered EV charging station on an interactive map. Filter by charger type or state to find exactly what you need.
+          </p>
+        </div>
+        <Suspense fallback={<MapSkeleton />}>
+          <ChargingMap />
+        </Suspense>
+      </section>
+
       {/* ─── CATEGORY CHIPS ─── */}
       <div className="category-section" id="find" role="navigation" aria-label="Filter by charger type">
         <div className="category-inner">
@@ -431,82 +566,7 @@ export default function LandingPageClient({ initialUser }: LandingPageProps) {
         </div>
       </div>
 
-      {/* ─── HOW IT WORKS CAROUSEL ─── */}
-      <section className="journey-section" aria-labelledby="journey-heading">
-        <div className="section-header fade-in">
-          <div className="section-eyebrow">How It Works</div>
-          <h2 className="section-title" id="journey-heading">
-            Your EV journey,<br />
-            <em style={{ fontStyle: "italic" }}>explained simply</em>
-          </h2>
-          <p className="section-subtitle">
-            From finding a charger to completing a session — it takes just 4 steps. No QR codes. No complexity.
-          </p>
-        </div>
 
-        <div className="carousel-wrapper fade-in">
-          <div className="carousel-track-outer">
-            <div
-              className="carousel-track"
-              style={{
-                transform: `translateX(-${carouselIndex * (100 / visibleSteps)}%)`,
-                transition: "transform 0.5s cubic-bezier(0.16, 1, 0.3, 1)",
-              }}
-              role="list"
-            >
-              {JOURNEY_STEPS.map((step) => (
-                <div
-                  key={step.num}
-                  className="journey-step"
-                  style={{ flex: `0 0 calc(${100 / visibleSteps}% - var(--space-4))` }}
-                  role="listitem"
-                >
-                  <div className="step-number" aria-hidden="true">
-                    {step.num}
-                  </div>
-                  <div className={`step-icon-wrap ${step.tagType}`}>
-                    {step.icon}
-                  </div>
-                  <h3 className="step-title">{step.title}</h3>
-                  <p className="step-desc">{step.desc}</p>
-                  <div className={`step-tag ${step.tagType}`}>{step.tag}</div>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          <div className="carousel-nav" aria-label="Carousel navigation">
-            <button
-              onClick={slidePrev}
-              className="carousel-btn"
-              disabled={carouselIndex === 0}
-              aria-label="Previous step"
-            >
-              <ChevronLeft className="w-5 h-5" />
-            </button>
-            <div className="carousel-dots" id="carouselDots" role="tablist" aria-label="Journey steps">
-              {Array.from({ length: maxCarouselIndex + 1 }).map((_, i) => (
-                <button
-                  key={i}
-                  className={`carousel-dot ${carouselIndex === i ? "active" : ""}`}
-                  role="tab"
-                  aria-selected={carouselIndex === i}
-                  aria-label={`Go to step ${i + 1}`}
-                  onClick={() => setCarouselIndex(i)}
-                />
-              ))}
-            </div>
-            <button
-              onClick={slideNext}
-              className="carousel-btn"
-              disabled={carouselIndex === maxCarouselIndex}
-              aria-label="Next step"
-            >
-              <ChevronRight className="w-5 h-5" />
-            </button>
-          </div>
-        </div>
-      </section>
 
       {/* ─── LISTINGS ─── */}
       <section className="listings-section" aria-labelledby="listings-heading">
@@ -614,24 +674,91 @@ export default function LandingPageClient({ initialUser }: LandingPageProps) {
           </div>
 
           {/* LISTINGS GRID */}
-          <SearchListings
-            searchQuery={searchQuery}
-            userCoords={userCoords}
-            filterType={filterType}
-            sortOrder={sortOrder}
-            radius={radius}
-            maxPrice={maxPrice}
-            plugTypes={plugTypes}
-            page={page}
-            favorites={favorites}
-            bookingLoaderId={bookingLoaderId}
-            bookingError={bookingError}
-            onToggleFavorite={toggleFavorite}
-            onRequestBooking={handleRequestBooking}
-            onSetPage={setPage}
-            onSetTotal={setTotal}
-            getFilteredChargers={getFilteredChargers}
-          />
+          <Suspense fallback={<ListingsSkeleton />}>
+            <SearchListings
+              searchQuery={searchQuery}
+              userCoords={userCoords}
+              filterType={filterType}
+              sortOrder={sortOrder}
+              radius={radius}
+              maxPrice={maxPrice}
+              plugTypes={plugTypes}
+              page={page}
+              favorites={favorites}
+              bookingLoaderId={bookingLoaderId}
+              bookingError={bookingError}
+              selectedChargerId={selectedChargerId}
+              onSelectCharger={(chargerId) => setSelectedChargerId(chargerId)}
+              onToggleFavorite={toggleFavorite}
+              onRequestBooking={handleRequestBooking}
+              onSetPage={setPage}
+              onSetTotal={setTotal}
+              getFilteredChargers={getFilteredChargers}
+              loading={loading}
+            />
+          </Suspense>
+
+          {/* ─── PUBLIC CHARGING SITES (Government/CPO) ─── */}
+          <div
+            className="section-header fade-in"
+            style={{ marginTop: "var(--space-12)", marginBottom: "var(--space-6)" }}
+          >
+            <div className="section-eyebrow">Government & Public CPO Network</div>
+            <h2 className="section-title" id="public-sites-heading">
+              India&apos;s Public<br />
+              <em style={{ fontStyle: "italic" }}>EV Charging Infrastructure</em>
+            </h2>
+            <p
+              style={{
+                fontSize: "var(--text-sm)",
+                color: "var(--color-text-muted)",
+                marginTop: "var(--space-2)",
+                maxWidth: "560px",
+              }}
+            >
+              Browse government and public charging stations across India — deployed by
+              state DISCOMs, oil companies, and CPOs under the National Mission for
+              Transformative Mobility.
+            </p>
+          </div>
+
+          {/* Charging Sites Grid */}
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))",
+              gap: "var(--space-4)",
+              marginBottom: "var(--space-12)",
+            }}
+            role="list"
+            aria-label="Public EV charging sites"
+          >
+            {chargingSitesLoading ? (
+              Array.from({ length: 8 }).map((_, i) => (
+                <div
+                  key={i}
+                  className="animate-pulse"
+                  style={{
+                    background: "var(--color-surface-2)",
+                    height: "240px",
+                    borderRadius: "16px",
+                    border: "1.5px solid var(--color-border)",
+                  }}
+                />
+              ))
+            ) : chargingSites.length === 0 ? (
+              <div
+                className="col-span-full text-center py-12"
+                style={{ color: "var(--color-text-muted)", fontSize: "var(--text-sm)" }}
+              >
+                No public charging sites found in your region yet.
+              </div>
+            ) : (
+              chargingSites.map((site) => (
+                <ChargingSiteCard key={site.id} site={site} />
+              ))
+            )}
+          </div>
         </div>
       </section>
 
@@ -703,6 +830,83 @@ export default function LandingPageClient({ initialUser }: LandingPageProps) {
               <div className="trust-num">25%</div>
               <div className="trust-label">Monthly growth rate — India's fastest EV charging network</div>
             </div>
+          </div>
+        </div>
+      </section>
+
+            {/* ─── HOW IT WORKS CAROUSEL ─── */}
+      <section className="journey-section" aria-labelledby="journey-heading">
+        <div className="section-header fade-in">
+          <div className="section-eyebrow">How It Works</div>
+          <h2 className="section-title" id="journey-heading">
+            Your EV journey,<br />
+            <em style={{ fontStyle: "italic" }}>explained simply</em>
+          </h2>
+          <p className="section-subtitle">
+            From finding a charger to completing a session — it takes just 4 steps. No QR codes. No complexity.
+          </p>
+        </div>
+
+        <div className="carousel-wrapper fade-in">
+          <div className="carousel-track-outer">
+            <div
+              className="carousel-track"
+              style={{
+                transform: `translateX(-${carouselIndex * (100 / visibleSteps)}%)`,
+                transition: "transform 0.5s cubic-bezier(0.16, 1, 0.3, 1)",
+              }}
+              role="list"
+            >
+              {JOURNEY_STEPS.map((step) => (
+                <div
+                  key={step.num}
+                  className="journey-step"
+                  style={{ flex: `0 0 calc(${100 / visibleSteps}% - var(--space-4))` }}
+                  role="listitem"
+                >
+                  <div className="step-number" aria-hidden="true">
+                    {step.num}
+                  </div>
+                  <div className={`step-icon-wrap ${step.tagType}`}>
+                    {step.icon}
+                  </div>
+                  <h3 className="step-title">{step.title}</h3>
+                  <p className="step-desc">{step.desc}</p>
+                  <div className={`step-tag ${step.tagType}`}>{step.tag}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div className="carousel-nav" aria-label="Carousel navigation">
+            <button
+              onClick={slidePrev}
+              className="carousel-btn"
+              disabled={carouselIndex === 0}
+              aria-label="Previous step"
+            >
+              <ChevronLeft className="w-5 h-5" />
+            </button>
+            <div className="carousel-dots" id="carouselDots" role="tablist" aria-label="Journey steps">
+              {Array.from({ length: maxCarouselIndex + 1 }).map((_, i) => (
+                <button
+                  key={i}
+                  className={`carousel-dot ${carouselIndex === i ? "active" : ""}`}
+                  role="tab"
+                  aria-selected={carouselIndex === i}
+                  aria-label={`Go to step ${i + 1}`}
+                  onClick={() => setCarouselIndex(i)}
+                />
+              ))}
+            </div>
+            <button
+              onClick={slideNext}
+              className="carousel-btn"
+              disabled={carouselIndex === maxCarouselIndex}
+              aria-label="Next step"
+            >
+              <ChevronRight className="w-5 h-5" />
+            </button>
           </div>
         </div>
       </section>

@@ -1,9 +1,8 @@
 "use client";
 
-import { useState, useEffect } from "react";
-import { SearchResponse } from "@/hooks/useChargers";
-import ChargerCard from "./ChargerCard";
+import { useState, useEffect, useRef } from "react";
 import { ChargerResult } from "@/lib/types";
+import ChargerCard from "./ChargerCard";
 import ChargerDetailModal from "./ChargerDetailModal";
 
 interface SearchListingsProps {
@@ -18,11 +17,14 @@ interface SearchListingsProps {
   favorites: string[];
   bookingLoaderId: string;
   bookingError: string;
+  selectedChargerId: string | null;
+  onSelectCharger: (chargerId: string) => void;
   onToggleFavorite: (id: string, e: React.MouseEvent) => void;
   onRequestBooking: (id: string) => void;
   onSetPage: (page: number) => void;
   onSetTotal: (total: number) => void;
   getFilteredChargers: () => ChargerResult[];
+  loading: boolean;
 }
 
 export default function SearchListings({
@@ -37,16 +39,17 @@ export default function SearchListings({
   favorites,
   bookingLoaderId,
   bookingError,
+  selectedChargerId,
+  onSelectCharger,
   onToggleFavorite,
   onRequestBooking,
   onSetPage,
   onSetTotal,
   getFilteredChargers,
+  loading,
 }: SearchListingsProps) {
-  const [dbChargers, setDbChargers] = useState<ChargerResult[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [total, setTotal] = useState(0);
   const [selectedCharger, setSelectedCharger] = useState<ChargerResult | null>(null);
+  const chargerRefs = useRef<Record<string, HTMLDivElement | null>>({});
 
   const openDetail = (charger: ChargerResult) => {
     setSelectedCharger(charger);
@@ -56,59 +59,17 @@ export default function SearchListings({
     setSelectedCharger(null);
   };
 
-  // Fetch chargers from DB with geolocation if enabled
   useEffect(() => {
-    let active = true;
-    async function fetchChargers() {
-      setLoading(true);
-      try {
-        const params = new URLSearchParams();
-        if (searchQuery) params.set("q", searchQuery);
-        if (userCoords) {
-          params.set("lat", String(userCoords.lat));
-          params.set("lng", String(userCoords.lng));
-        }
-        // Add new filter parameters
-        if (filterType !== "All Types") {
-          params.set(
-            "chargerType",
-            filterType === "AC Charger" ? "AC Charger" : "DC Fast"
-          );
-        }
-        // Add radius (default 50km)
-        params.set("radius", String(radius));
-        // Add max price filter
-        if (maxPrice) params.set("maxPrice", maxPrice);
-        // Add plug type filter if needed
-        if (plugTypes.length > 0) {
-          params.set("plug", plugTypes.join(","));
-        }
-        // Add page (default 1)
-        params.set("page", String(page));
-
-        const res = await fetch(`/api/chargers/search?${params.toString()}`);
-        if (res.ok && active) {
-          const data: SearchResponse = await res.json();
-          setDbChargers(data.data || []);
-          setTotal(data.total);
-        }
-      } catch (err) {
-        console.error("Failed to fetch chargers:", err);
-      } finally {
-        if (active) setLoading(false);
+    if (selectedChargerId) {
+      const target = chargerRefs.current[selectedChargerId];
+      if (target) {
+        target.scrollIntoView({ behavior: "smooth", block: "center" });
       }
     }
+  }, [selectedChargerId]);
 
-    const delayDebounce = setTimeout(() => {
-      fetchChargers();
-    }, 300);
-
-    return () => {
-      active = false;
-      clearTimeout(delayDebounce);
-    };
-  }, [searchQuery, userCoords, filterType, radius, maxPrice, plugTypes, page]);
-
+  // NOTE: Data fetching is owned by the parent (useChargers hook).
+  // This component is now a pure presentation layer — no duplicate fetch.
   const filteredChargers = getFilteredChargers();
 
   return (
@@ -146,15 +107,29 @@ export default function SearchListings({
               No chargers found. Try resetting filters or search query.
             </div>
           ) : (
-            filteredChargers.map((charger) => (
-              <ChargerCard
-                key={charger.id}
-                charger={charger}
-                bookingLoaderId={bookingLoaderId}
-                onRequestBooking={onRequestBooking}
-                onClick={() => openDetail(charger)}
-              />
-            ))
+            filteredChargers.map((charger) => {
+              const isSelected = charger.id === selectedChargerId;
+              return (
+                <div
+                  key={charger.id}
+                  ref={(el) => {
+                    chargerRefs.current[charger.id] = el;
+                  }}
+                  style={{
+                    borderRadius: "18px",
+                    boxShadow: isSelected ? "0 0 0 3px rgba(34, 145, 79, 0.18)" : "none",
+                    transition: "box-shadow 0.2s ease",
+                  }}
+                >
+                  <ChargerCard
+                    charger={charger}
+                    bookingLoaderId={bookingLoaderId}
+                    onRequestBooking={onRequestBooking}
+                    onClick={() => onSelectCharger(charger.id)}
+                  />
+                </div>
+              );
+            })
           )}
         </div>
       </div>
