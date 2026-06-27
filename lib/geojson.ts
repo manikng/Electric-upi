@@ -35,7 +35,10 @@ export function toGeoJSON(data: StationsJson): FeatureCollection {
       if (isNaN(lat) || isNaN(lon)) return null;
       return {
         type: "Feature" as const,
-        geometry: { type: "Point" as const, coordinates: [lon, lat] },
+        geometry: {
+          type: "Point" as const,
+          coordinates: [lon, lat] as [number, number], // ✅ fix: tuple assertion
+        },
         properties: {
           cpoName: r["CPO Name"],
           sector: r["Govt/Private"],

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef, Suspense } from "react";
+import { useState, useEffect, useRef, useCallback, useDeferredValue, Suspense } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { User } from "@supabase/supabase-js";
@@ -32,7 +32,6 @@ import { ChargingSiteResult } from "@/lib/types";
 // Import components
 import FilterBar from "@/components/FilterBar";
 import SearchListings from "@/components/SearchListings";
-import ChargerMap from "@/components/ChargerMap";
 import ChargingSiteCard from "@/components/ChargingSiteCard";
 import dynamic from "next/dynamic";
 
@@ -244,10 +243,13 @@ export default function LandingPageClient({ initialUser = null }: LandingPagePro
     page,
   });
 
-  const handleSearchSubmit = (value: string) => {
+  const handleSearchSubmit = useCallback((value: string) => {
     setSubmittedQuery(value);
     setPage(1); // Reset to first page on new search
-  };
+  }, []);
+
+  // Deferred query keeps typing responsive while heavy children update later
+  const deferredQuery = useDeferredValue(submittedQuery);
 
   // Hero Carousel Auto-play
   useEffect(() => {
@@ -261,20 +263,20 @@ export default function LandingPageClient({ initialUser = null }: LandingPagePro
     };
   }, [isAutoPlaying]);
 
-  const goToSlide = (index: number) => {
+  const goToSlide = useCallback((index: number) => {
     setCurrentSlide(index);
     if (autoPlayRef.current) clearInterval(autoPlayRef.current);
     setIsAutoPlaying(false);
     setTimeout(() => setIsAutoPlaying(true), 10000);
-  };
+  }, []);
 
-  const nextSlide = () => {
+  const nextSlide = useCallback(() => {
     setCurrentSlide((prev) => (prev + 1) % HERO_SLIDES.length);
-  };
+  }, []);
 
-  const prevSlide = () => {
+  const prevSlide = useCallback(() => {
     setCurrentSlide((prev) => (prev - 1 + HERO_SLIDES.length) % HERO_SLIDES.length);
-  };
+  }, []);
 
   // Carousel controls
   // `visibleSteps` is a client-only responsive value. Initialize to 3 (desktop)
@@ -291,13 +293,13 @@ export default function LandingPageClient({ initialUser = null }: LandingPagePro
 
   const maxCarouselIndex = Math.max(0, JOURNEY_STEPS.length - visibleSteps);
 
-  const slidePrev = () => {
+  const slidePrev = useCallback(() => {
     setCarouselIndex((prev) => Math.max(0, prev - 1));
-  };
+  }, []);
 
-  const slideNext = () => {
+  const slideNext = useCallback(() => {
     setCarouselIndex((prev) => Math.min(maxCarouselIndex, prev + 1));
-  };
+  }, [maxCarouselIndex]);
 
   // Fetch public charging sites with search/filter based on user's submittedQuery
   useEffect(() => {
@@ -695,7 +697,7 @@ export default function LandingPageClient({ initialUser = null }: LandingPagePro
           {/* LISTINGS GRID */}
           <Suspense fallback={<ListingsSkeleton />}>
             <SearchListings
-              searchQuery={submittedQuery}
+              searchQuery={deferredQuery}
               userCoords={userCoords}
               filterType={filterType}
               sortOrder={sortOrder}

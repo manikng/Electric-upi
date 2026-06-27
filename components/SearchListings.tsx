@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
+import React from "react";
 import { ChargerResult } from "@/lib/types";
 import ChargerCard from "./ChargerCard";
 import ChargerDetailModal from "./ChargerDetailModal";
@@ -27,7 +28,7 @@ interface SearchListingsProps {
   loading: boolean;
 }
 
-export default function SearchListings({
+const SearchListings = React.memo(function SearchListings({
   searchQuery,
   userCoords,
   filterType,
@@ -146,4 +147,6 @@ export default function SearchListings({
       )}
     </div>
   );
-}
+});
+
+export default SearchListings;

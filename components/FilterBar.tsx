@@ -1,5 +1,6 @@
 "use client";
 
+import React from "react";
 import { Search, MapPin, SlidersHorizontal } from "lucide-react";
 
 interface FilterBarProps {
@@ -16,7 +17,7 @@ interface FilterBarProps {
   onReset: () => void;
 }
 
-export default function FilterBar({
+const FilterBar = React.memo(function FilterBar({
   searchQuery,
   onSearchChange,
   onSearchSubmit,
@@ -148,4 +149,6 @@ export default function FilterBar({
       </button>
     </div>
   );
-}
+});
+
+export default FilterBar;

@@ -1,5 +1,6 @@
 "use client";
 
+import React from "react";
 import { MapPin, Zap, Building2, Plug, Hash } from "lucide-react";
 import { ChargingSiteResult } from "@/app/api/charging-sites/route";
 
@@ -8,7 +9,7 @@ interface ChargingSiteCardProps {
   onClick?: () => void;
 }
 
-export default function ChargingSiteCard({ site, onClick }: ChargingSiteCardProps) {
+const ChargingSiteCard = React.memo(function ChargingSiteCard({ site, onClick }: ChargingSiteCardProps) {
   const ownershipColor =
     site.ownership.toLowerCase() === "government"
       ? "var(--color-info)"
@@ -263,4 +264,6 @@ export default function ChargingSiteCard({ site, onClick }: ChargingSiteCardProp
       </div>
     </article>
   );
-}
+});
+
+export default ChargingSiteCard;

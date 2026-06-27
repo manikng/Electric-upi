@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, useMemo } from "react";
+import React from "react";
 import L from "leaflet";
 import { MapContainer, TileLayer, Marker, Popup, useMap } from "react-leaflet";
 import MarkerClusterGroup from "react-leaflet-markercluster";
@@ -44,7 +45,7 @@ function FlyToBounds({ features }: { features: GeoJSON.Feature[] }) {
   return null;
 }
 
-export default function ChargingMap({ chargerTypeFilter, stateFilter, onFilterChange }: ChargingMapProps) {
+const ChargingMap = React.memo(function ChargingMap({ chargerTypeFilter, stateFilter, onFilterChange }: ChargingMapProps) {
   const [data, setData] = useState<GeoJSON.FeatureCollection | null>(null);
   const [loading, setLoading] = useState(true);
   const [localType, setLocalType] = useState(chargerTypeFilter ?? "All");
@@ -119,4 +120,6 @@ export default function ChargingMap({ chargerTypeFilter, stateFilter, onFilterCh
     </div>
     </>
   );
-}
+});
+
+export default ChargingMap;
