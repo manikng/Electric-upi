@@ -50,6 +50,15 @@ export interface ConnectorProfile {
   connectorCount: number;
 }
 
+export interface MapSearchResponse {
+  chargers: ChargerResult[];
+  sites: ChargingSiteResult[];
+  center: { lat: number; lng: number };
+  totalChargers: number;
+  totalSites: number;
+}
+
+
 export interface ChargingSiteResult {
   id: string;
   cpoName: string;
