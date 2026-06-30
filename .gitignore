@@ -23,6 +23,9 @@
 # production
 /build
 
+openchargemap_india.json
+ev_charging_stations.json
+
 # misc
 .DS_Store
 *.pem
