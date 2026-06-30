@@ -49,6 +49,4 @@ yarn-error.log*
 next-env.d.ts
 
 #some text and md files
-*.txt
-*.md
 !README.md

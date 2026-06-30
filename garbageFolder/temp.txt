@@ -1,0 +1,637 @@
+use deepseekv4flash (nvidia-nim) or (OAIrouter) in subagent2 to implement next todo 
+use multiple agent to implement task using different specific models available expect copilot modles
+--
+use checkpointing in a file right now to avoid loss use at least 3 subagents in parallel bro plan a todo which subagent work which part 
+except copoilt models use nvidia nim or oaiprovider models for subagent
+--------------------------cur mistake-----------------------
+
+
+What your description matches
+You currently have two separate handshake models stored in the same public.bookings table:
+
+Canonical / new model (in code):
+secret_code, code_expires_at, code_used
+Old / unused model (in SQL/RLS):
+nonce, nonce_expires_at, nonce_used, plus host_confirmed, driver_confirmed
+Because your RLS SQL (or update logic) still targets the old nonce fields, the app can successfully generate/verify a nonce in the DB world—but your app-side “active code” verification updates secret_code, so nothing changes the status the way your RLS/update model expects.
+
+That’s why you had to manually flip the booking status in Supabase for it to “work”: your app and your DB authorization/workflow are not updating the same fields.
+
+Confirmed from your database schema
+Your public.bookings table contains both sets of columns, including:
+
+secret_code, code_expires_at, code_used
+nonce, nonce_expires_at, nonce_used
+host_confirmed, driver_confirmed
+status (default: pending_host_accept)
+So the schema drift is real and the “two models” situation is literally possible.
+
+Also, your RLS policies listing currently shows only bookings_insert_* and bookings_select_participants. I don’t yet see an UPDATE/verification policy in the result we pulled, which strongly suggests the verification step is currently implemented outside of RLS (or via a different SQL file you referenced).*_
+
+The key architectural fix
+Pick one canonical verification system and make the DB enforce it
+If your goal is:
+
+Driver confirms by providing a secret code
+On successful verify (and not expired / not used), DB:
+marks code_used = true
+sets the appropriate status
+(optionally) clears/disables the code fields
+Then the safest approach is:
+
+Stop using nonce fields for the “booking becomes verified” transition
+Implement verification as one DB operation (a Postgres function or Edge Function that calls a single RPC), so there is never a “half-updated” state requiring manual UI edits.
+Recommended implementation pattern (no drift)
+1) Create a single RPC: verify_booking_code(booking_id, code)
+This RPC should do the whole flow atomically:
+
+validate secret_code matches
+validate code_expires_at > now()
+validate code_used = false
+update:
+code_used = true
+set status = ... (whatever your “verified” state is)
+return the updated booking row
+Whether you call it from an Edge Function or directly from your server code, the important part is: DB is the canonical state machine.
+
+2) Remove/ignore old nonce verification writes
+After you migrate:
+
+either stop writing nonce_*, host_confirmed, driver_confirmed
+or keep them but make sure nothing “verified” depends on them anymore*_
+(Optionally later: drop columns / rename, but that’s the later migration step.)
+
+One important clarification about “RLS bypassed anyway”
+Even if you’re “bypassing RLS” in your route handlers sometimes, the mismatch can still happen because:
+
+the problem may be not permissions but the UPDATE logic targeting the wrong columns, or
+the wrong columns are used to derive status transitions (in SQL triggers, views, or verification queries)
+So the fix is still the same: one canonical model + one atomic verification update.
+
+What I need from you to generate the exact SQL/function
+Reply with:
+
+What exact status value should the booking move to when the secret code is verified? (e.g. active, pending_driver_accept, etc.)
+Should verification be allowed only for driver_id or also for host_id?
+Do you want the DB to update host_confirmed / driver_confirmed too, or are those fully deprecated?
+Once you answer those 3, I can write the exact Postgres function (and the SQL policy/RPC wiring if you want it RLS-secure).
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+--------------------------------------------------------end-----------------------
+list charging mai image upload error.
+the options my booking and host dashboard these should be shown or visible only when the user has listed a place or any user has confirmed a booking.
+see rls fine grained access in this file and check for errors and debug them
+[my thinking flow md file]
+import { NextResponse } from "next/server";
+import { createSupabaseServerClient } from "@/lib/supabase/server-client";
+import { db } from "@/lib/db";
+import { bookings, chargers } from "@/lib/schema";
+import { eq, and } from "drizzle-orm";
+import crypto from "crypto";
+
+// ── POST /api/bookings/[id]/accept ──
+// Charger host accepts a pending booking request.
+// Generates secure 6-digit OTP code using crypto.randomInt.
+export async function POST(
+  request: Request,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  try {
+    const { id } = await params;
+
+    // 1. Verify user session
+    const supabase = await createSupabaseServerClient();
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+
+    if (!user) {
+      return NextResponse.json({ error: "Unauthorized. Please sign in." }, { status: 401 });
+    }
+
+    // 2. Fetch booking and parent charger details
+    const [booking] = await db
+      .select({
+        bookingId: bookings.id,
+        status: bookings.status,
+        chargerId: bookings.chargerId,
+        hostId: chargers.hostId,
+      })
+      .from(bookings)
+      .innerJoin(chargers, eq(bookings.chargerId, chargers.id))
+      .where(eq(bookings.id, id))
+      .limit(1);
+
+    if (!booking) {
+      return NextResponse.json({ error: "Booking not found." }, { status: 404 });
+    }
+
+    // 3. Verify that caller is the host of this charger (adversarial guard)
+    if (booking.hostId !== user.id) {
+      return NextResponse.json({ error: "Forbidden. You are not the host for this charger." }, { status: 403 });
+    }
+
+    // 4. Verify status is pending
+    if (booking.status !== "pending_host_accept") {
+      return NextResponse.json(
+        { error: `Cannot accept booking in its current state: '${booking.status}'` },
+        { status: 400 }
+      );
+    }
+
+    // 5. Generate secure 6-digit mutual nonce and expiration (15 minutes from now)
+    const nonce = crypto.randomInt(100000, 1000000).toString().padStart(6, "0");
+    const expiry = new Date(Date.now() + 15 * 60 * 1000); // 15 mins
+
+    // 6. Conditional update: set nonce and handshake fields only if booking is still pending
+    const result = await db
+      .update(bookings)
+      .set({
+        status: "awaiting_handshake",
+        nonce: nonce,
+        nonceExpiresAt: expiry,
+        nonceUsed: false,
+        hostConfirmed: false,
+        driverConfirmed: false,
+        nonceGeneratedAt: new Date(),
+        nonceGeneratedBy: user.id,
+      })
+      .where(and(eq(bookings.id, id), eq(bookings.status, "pending_host_accept")));
+
+    // verify update affected a row
+    // drizzle returns a result we can inspect via .rowCount in some drivers; fall back to selecting
+    const [updatedBooking] = await db.select().from(bookings).where(eq(bookings.id, id)).limit(1);
+    if (!updatedBooking || updatedBooking.status !== "awaiting_handshake") {
+      return NextResponse.json({ error: "Failed to accept booking (state changed)." }, { status: 409 });
+    }
+
+    return NextResponse.json({
+      success: true,
+      status: "awaiting_driver_arrival",
+      message: "Booking request accepted. Awaiting driver arrival code verification.",
+    }, { status: 200 });
+  } catch (error) {
+    console.error("POST /api/bookings/[id]/accept error:", error);
+    return NextResponse.json({ error: "Internal server error" }, { status: 500 });
+  }
+}
+import { NextResponse } from "next/server";
+import { createSupabaseServerClient } from "@/lib/supabase/server-client";
+import { db } from "@/lib/db";
+import { bookings, chargers } from "@/lib/schema";
+import { eq } from "drizzle-orm";
+
+// ── POST /api/bookings/[id]/end ──
+// Driver or host triggers the end of charging.
+// Calculates energy consumed and final cost.
+export async function POST(
+  request: Request,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  try {
+    const { id } = await params;
+
+    // 1. Verify user session
+    const supabase = await createSupabaseServerClient();
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+
+    if (!user) {
+      return NextResponse.json({ error: "Unauthorized. Please sign in." }, { status: 401 });
+    }
+
+    // 2. Fetch booking and parent charger details
+    const [booking] = await db
+      .select({
+        bookingId: bookings.id,
+        status: bookings.status,
+        driverId: bookings.driverId,
+        pricePerKwh: chargers.pricePerKwh,
+        hostId: chargers.hostId,
+      })
+      .from(bookings)
+      .innerJoin(chargers, eq(bookings.chargerId, chargers.id))
+      .where(eq(bookings.id, id))
+      .limit(1);
+
+    if (!booking) {
+      return NextResponse.json({ error: "Booking not found." }, { status: 404 });
+    }
+
+    // 3. Authorization Guard: caller must be driver or host
+    const isDriver = booking.driverId === user.id;
+    const isHost = booking.hostId === user.id;
+
+    if (!isDriver && !isHost) {
+      return NextResponse.json({ error: "Forbidden. You are not a party to this booking." }, { status: 403 });
+    }
+
+    // 4. Verify booking is verified
+    if (booking.status !== "charging") {
+      return NextResponse.json(
+        { error: `Cannot end charging session. Booking status is '${booking.status}' (expected 'charging')` },
+        { status: 400 }
+      );
+    }
+
+    // 5. Calculate energy consumption metrics
+    const energyKwhSafe = "10.500"; // Mock 10.5 kWh consumption
+    const price = parseFloat(booking.pricePerKwh);
+    const cost = price * parseFloat(energyKwhSafe);
+
+    // 6. Update booking state: set endedAt to current time, status to 'completed', record energy
+    await db
+      .update(bookings)
+      .set({
+        status: "completed",
+        endedAt: new Date(),
+        energyKwh: energyKwhSafe,
+      })
+      .where(eq(bookings.id, id));
+
+    return NextResponse.json({
+      success: true,
+      status: "completed",
+      energyKwh: 10.5,
+      cost: parseFloat(cost.toFixed(2)),
+      message: "Charging session completed successfully. Pending UPI payment split.",
+    }, { status: 200 });
+  } catch (error) {
+    console.error("POST /api/bookings/[id]/end error:", error);
+    return NextResponse.json({ error: "Internal server error" }, { status: 500 });
+  }
+}
+import { NextResponse } from "next/server";
+import { createSupabaseServerClient } from "@/lib/supabase/server-client";
+import { db } from "@/lib/db";
+import { bookings } from "@/lib/schema";
+import { eq } from "drizzle-orm";
+import crypto from "crypto";
+
+// ── POST /api/bookings/[id]/regenerate-code ──
+// Driver requests a new verification code.
+export async function POST(
+  request: Request,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  try {
+    const { id } = await params;
+
+    // 1. Verify user session
+    const supabase = await createSupabaseServerClient();
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+
+    if (!user) {
+      return NextResponse.json({ error: "Unauthorized. Please sign in." }, { status: 401 });
+    }
+
+    // 2. Fetch booking details
+    const [booking] = await db
+      .select({
+        bookingId: bookings.id,
+        status: bookings.status,
+        driverId: bookings.driverId,
+        nonceGeneratedAt: bookings.nonceGeneratedAt,
+      })
+      .from(bookings)
+      .where(eq(bookings.id, id))
+      .limit(1);
+
+    if (!booking) {
+      return NextResponse.json({ error: "Booking not found." }, { status: 404 });
+    }
+
+    // 3. Verify caller is the driver who requested the booking (adversarial guard)
+    if (booking.driverId !== user.id) {
+      return NextResponse.json({ error: "Forbidden. Only the booking driver can regenerate codes." }, { status: 403 });
+    }
+
+    // 4. Verify booking is in the correct handshake state
+    if (booking.status !== "awaiting_handshake") {
+      return NextResponse.json(
+        { error: `Cannot regenerate nonce when status is '${booking.status}'` },
+        { status: 400 }
+      );
+    }
+
+    // 4b. Simple rate limit: enforce 2-minute cooldown between regenerations
+    if (booking.nonceGeneratedAt && new Date() < new Date(new Date(booking.nonceGeneratedAt).getTime() + 2 * 60 * 1000)) {
+      return NextResponse.json({ error: "You can regenerate a nonce only once every 2 minutes." }, { status: 429 });
+    }
+
+    // 5. Generate new secure 6-digit nonce and new expiration (15 minutes from now)
+    const newNonce = crypto.randomInt(100000, 1000000).toString().padStart(6, "0");
+    const expiry = new Date(Date.now() + 15 * 60 * 1000);
+
+    // 6. Update database: set nonce, expiry, reset confirmations, record generatedAt/by
+    await db
+      .update(bookings)
+      .set({
+        nonce: newNonce,
+        nonceExpiresAt: expiry,
+        nonceUsed: false,
+        hostConfirmed: false,
+        driverConfirmed: false,
+        nonceGeneratedAt: new Date(),
+        nonceGeneratedBy: user.id,
+      })
+      .where(eq(bookings.id, id));
+
+    return NextResponse.json({
+      success: true,
+      nonce: newNonce,
+      nonceExpiresAt: expiry,
+      message: "New nonce generated successfully.",
+    }, { status: 200 });
+  } catch (error) {
+    console.error("POST /api/bookings/[id]/regenerate-code error:", error);
+    return NextResponse.json({ error: "Internal server error" }, { status: 500 });
+  }
+}
+import { NextResponse } from "next/server";
+import { createSupabaseServerClient } from "@/lib/supabase/server-client";
+import { db } from "@/lib/db";
+import { bookings, chargers } from "@/lib/schema";
+import { eq } from "drizzle-orm";
+
+// ── POST /api/bookings/[id]/start ──
+// Driver or host triggers the start of charging.
+export async function POST(
+  request: Request,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  try {
+    const { id } = await params;
+
+    // 1. Verify user session
+    const supabase = await createSupabaseServerClient();
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+
+    if (!user) {
+      return NextResponse.json({ error: "Unauthorized. Please sign in." }, { status: 401 });
+    }
+
+    // 2. Fetch booking and parent charger details
+    const [booking] = await db
+      .select({
+        bookingId: bookings.id,
+        status: bookings.status,
+        driverId: bookings.driverId,
+        hostId: chargers.hostId,
+      })
+      .from(bookings)
+      .innerJoin(chargers, eq(bookings.chargerId, chargers.id))
+      .where(eq(bookings.id, id))
+      .limit(1);
+
+    if (!booking) {
+      return NextResponse.json({ error: "Booking not found." }, { status: 404 });
+    }
+
+    // 3. Authorization Guard: caller must be driver or host
+    const isDriver = booking.driverId === user.id;
+    const isHost = booking.hostId === user.id;
+
+    if (!isDriver && !isHost) {
+      return NextResponse.json({ error: "Forbidden. You are not a party to this booking." }, { status: 403 });
+    }
+
+    // 4. Verify booking is verified
+    if (booking.status !== "verified") {
+      return NextResponse.json(
+        { error: `Cannot start charging. Booking status is '${booking.status}' (expected 'verified')` },
+        { status: 400 }
+      );
+    }
+
+    // 5. Update booking state: set startedAt to current time, status to 'charging'
+    await db
+      .update(bookings)
+      .set({
+        status: "charging",
+        startedAt: new Date(),
+      })
+      .where(eq(bookings.id, id));
+
+    return NextResponse.json({
+      success: true,
+      status: "charging",
+      message: "Charging session started successfully.",
+    }, { status: 200 });
+  } catch (error) {
+    console.error("POST /api/bookings/[id]/start error:", error);
+    return NextResponse.json({ error: "Internal server error" }, { status: 500 });
+  }
+}
+import { NextResponse } from "next/server";
+import { createSupabaseServerClient } from "@/lib/supabase/server-client";
+import { db } from "@/lib/db";
+import { bookings, chargers } from "@/lib/schema";
+import { eq } from "drizzle-orm";
+
+// ── GET /api/bookings/[id]/status ──
+// High-frequency status polling route for drivers and hosts.
+export async function GET(
+  request: Request,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  try {
+    const { id } = await params;
+
+    // 1. Verify user session
+    const supabase = await createSupabaseServerClient();
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+
+    if (!user) {
+      return NextResponse.json({ error: "Unauthorized. Please sign in." }, { status: 401 });
+    }
+
+    // 2. Fetch booking details joined with charger to get hostId
+    const [booking] = await db
+      .select({
+        bookingId: bookings.id,
+        status: bookings.status,
+        nonce: bookings.nonce,
+        nonceExpiresAt: bookings.nonceExpiresAt,
+        nonceUsed: bookings.nonceUsed,
+        driverConfirmed: bookings.driverConfirmed,
+        hostConfirmed: bookings.hostConfirmed,
+        driverId: bookings.driverId,
+        hostId: chargers.hostId,
+      })
+      .from(bookings)
+      .innerJoin(chargers, eq(bookings.chargerId, chargers.id))
+      .where(eq(bookings.id, id))
+      .limit(1);
+
+    if (!booking) {
+      return NextResponse.json({ error: "Booking not found." }, { status: 404 });
+    }
+
+    // 3. Authorization Guard: caller must be driver or host
+    const isDriver = booking.driverId === user.id;
+    const isHost = booking.hostId === user.id;
+
+    if (!isDriver && !isHost) {
+      return NextResponse.json({ error: "Forbidden. You are not a party to this booking." }, { status: 403 });
+    }
+
+    // Invariant: only show raw nonce to the driver (host should not see it first),
+    // but both parties may read confirmation flags and expiry.
+    const sanitizedNonce = isDriver ? booking.nonce : null;
+
+    return NextResponse.json({
+      status: booking.status,
+      nonce: sanitizedNonce,
+      nonceExpiresAt: booking.nonceExpiresAt,
+      nonceUsed: booking.nonceUsed,
+      driverConfirmed: booking.driverConfirmed,
+      hostConfirmed: booking.hostConfirmed,
+    }, { status: 200 });
+  } catch (error) {
+    console.error("GET /api/bookings/[id]/status error:", error);
+    return NextResponse.json({ error: "Internal server error" }, { status: 500 });
+  }
+}
+----------------------cur task to do 
+## Booking State Machine Audit (compressed)
+
+**Target flow:** `pending_host_accept` → `awaiting_driver_arrival` → `active` → `charging` → `completed`
+
+**Verdict: NOT consistent.** APIs mostly follow the target flow, but UI still gates on `verified` after `verify-code` writes `active`. That breaks the post-verify step for both driver and host.
+
+Your [db-blueprint.md](supabase-backend-info/db-blueprint.md) is partly stale: `/start` checks `"active"` (not `"verified"`). The real break is **UI expects `verified`, API writes `active`**.
+
+---
+
+### Legacy symbol usage
+
+| Symbol | Status | Where used |
+|--------|--------|------------|
+| `verified` | **Dead write path** — no API sets it | Still **active in UI** (booking detail, host/driver dashboards, `lib/theme.ts`) |
+| `awaiting_handshake` | **Active read-compat** | `generate-code`, `verify-code`, `regenerate-code` accept it; `GET /api/bookings/[id]` + `/status` normalize → `awaiting_driver_arrival`; host UI OTP block handles both |
+| `nonce` / `nonceUsed` / `nonceExpiresAt` | **Active read-compat** | `verify-code` uses `secretCode ?? nonce`; `regenerate-code` writes both; `generate-code` uses `nonceGeneratedAt` for cooldown |
+| `hostConfirmed` / `driverConfirmed` | **Dead** | Schema + DB columns only — zero reads/writes in app code |
+
+---
+
+### Runtime bugs (with fixes)
+
+#### 1. `verified` vs `active` — post-verify UI is blank / Start hidden
+**Why it breaks:** `verify-code` sets `status: "active"`. All post-verify UI checks `"verified"`. Driver sees no Start Charging block; host sees no Start button.
+
+| File | Line | Fix |
+|------|------|-----|
+| [app/booking/[id]/page.tsx](app/booking/[id]/page.tsx) | 412 | Change `booking.status === "verified"` → also match `"active"` (or normalize in fetch) |
+| [app/host/bookings/page.tsx](app/host/bookings/page.tsx) | 137, 443 | Badge + Start block: use `"active"` instead of/in addition to `"verified"` |
+| [app/driver/bookings/page.tsx](app/driver/bookings/page.tsx) | 108 | Badge: handle `"active"` |
+| [lib/theme.ts](lib/theme.ts) | 129 | Badge: handle `"active"` |
+
+**Secondary break:** Any legacy DB row with `status = 'verified'` fails `POST /start` (expects `'active'`). Fix: `start` accepts both, or migrate `verified` → `active`.
+
+---
+
+#### 2. `active` status has no UI branch on driver detail page
+**File:** [app/booking/[id]/page.tsx](app/booking/[id]/page.tsx) ~412–466  
+**Why:** After verify, status is `active` but only `verified` renders duration picker + Start button. Driver lands in a dead zone.  
+**Fix:** Add `booking.status === "active"` branch (same as current `verified` block), or alias `active` → `verified` after fetch.
+
+---
+
+#### 3. Regenerate hits cooldown endpoint
+**File:** [app/booking/[id]/page.tsx](app/booking/[id]/page.tsx) ~377  
+**Why:** "Regenerate Code" calls `/generate-code` (2-min cooldown, line 49 of generate-code route). Returns 429 within cooldown. `/regenerate-code` exists with no cooldown and is never called.  
+**Fix:** Point Regenerate button to `POST /api/bookings/${id}/regenerate-code`.
+
+---
+
+#### 4. Driver page promises auto-update but never polls
+**File:** [app/booking/[id]/page.tsx](app/booking/[id]/page.tsx) ~331  
+**Why:** Copy says "This page will update automatically once accepted" but no polling/`/status` call. Driver stuck on `pending_host_accept` until manual refresh.  
+**Fix:** Poll `GET /api/bookings/${id}/status` (or refetch detail) on an interval while status is `pending_host_accept`.
+
+---
+
+#### 5. Race on start/end — no conditional UPDATE
+**Files:** [app/api/bookings/[id]/start/route.ts](app/api/bookings/[id]/start/route.ts) ~60–66, [end/route.ts](app/api/bookings/[id]/end/route.ts) ~67–74  
+**Why:** `UPDATE` has no `WHERE status = expected`. Double-click can re-run transition (e.g. reset `startedAt` on second start).  
+**Fix:** Match `accept` pattern: `.where(and(eq(bookings.id, id), eq(bookings.status, "active")))` for start; `eq(bookings.status, "charging")` for end; return 409 if 0 rows.
+
+---
+
+### API route consistency (core files)
+
+| Route | Expected transition | Actual | OK? |
+|-------|---------------------|--------|-----|
+| `accept` | `pending_host_accept` → `awaiting_driver_arrival` | Correct + conditional UPDATE | ✅ |
+| `generate-code` | stays `awaiting_driver_arrival`, writes `secretCode` | Correct | ✅ |
+| `verify-code` | `awaiting_driver_arrival` → `active` | Correct | ✅ |
+| `start` | `active` → `charging` | Correct | ✅ |
+| `end` | `charging` → `completed` | Correct | ✅ |
+
+---
+
+### Schema ([lib/schema.ts](lib/schema.ts))
+
+- Status comment (line 46) matches target flow ✅  
+- `secretCode` fields: **active** (primary OTP path)  
+- `nonce*` fields: **active compat** (read fallback + regenerate dual-write)  
+- `hostConfirmed` / `driverConfirmed`: **dead** (no runtime effect)
+
+---
+
+### Read-path normalization gaps
+
+| Endpoint | Normalizes `awaiting_handshake`? | Normalizes `active`/`verified`? |
+|----------|----------------------------------|-----------------------------------|
+| `GET /api/bookings/[id]` | ✅ | ❌ |
+| `GET /api/bookings/[id]/status` | ✅ | ❌ |
+| `GET /api/bookings/host` | ❌ (raw DB status) | ❌ |
+
+Host list still works for `awaiting_handshake` (UI handles both). It does **not** work for post-verify `active` (UI expects `verified`).
+
+---
+
+### Unreachable / mismatched states
+
+| State | Situation |
+|-------|-----------|
+| `verified` | Never written by current APIs; UI still expects it |
+| `active` | Written by `verify-code`; **no UI branch** on driver detail; host Start hidden |
+| `awaiting_handshake` | Legacy DB only; APIs + host UI handle it |
+
+---
+
+### Authorization
+
+All six core routes check session + driver/host role correctly. No auth inconsistencies found in audited files.
+
+---
+
+### Blueprint note
+
+DB currently has only `pending_host_accept` and `completed` — no rows at `active`/`verified`/`charging` yet. That explains why you haven't hit the verify→start break in live testing; it **will** break on the first full flow once host verifies.
+
+---
+
+**One-line summary if you need it after fixes:** Once `verified` → `active` is aligned everywhere, the single flow `pending_host_accept → awaiting_driver_arrival → active → charging → completed` will be consistent across schema, all six APIs, and booking UI — with `awaiting_handshake`/`nonce*` kept only as backward-compat reads for old rows.
