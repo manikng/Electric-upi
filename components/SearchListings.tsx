@@ -6,6 +6,7 @@ import { ChargerResult, ChargingSiteResult } from "@/lib/types";
 import ChargerCard from "./ChargerCard";
 import ChargingSiteCard from "./ChargingSiteCard";
 import ChargerDetailModal from "./ChargerDetailModal";
+import Link from "next/link";
 
 interface SearchListingsProps {
   searchQuery: string;
@@ -185,12 +186,13 @@ const results = useMemo(() => {
                       transition: "box-shadow 0.2s ease",
                     }}
                   >
-                    <ChargerCard
+                    <Link 
+                    href={`/host/chargers/${charger.id}`}
+                    className="listing-card-link block h-full  group">
+                      <ChargerCard
                       charger={charger}
-                      bookingLoaderId={bookingLoaderId}
-                      onRequestBooking={onRequestBooking}
-                      onClick={() => onSelectCharger(charger.id)}
                     />
+                    </Link>
                   </div>
                 );
               }

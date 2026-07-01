@@ -29,10 +29,21 @@ export default function ChargerClient({ initialCharger }: ChargerClientProps) {
 
   const charger = initialCharger;
 
-  const handleBooking = () => {
-    setIsBooking(true);
-    router.push(`/booking/${charger.id}`);
-  };
+  const handleBooking = async () => {
+  setIsBooking(true);
+  try {
+    const res = await fetch("/api/bookings", {
+      method: "POST",
+      body: JSON.stringify({ chargerId: charger.id }),
+    });
+    const data = await res.json();
+    router.push(`/booking/${data.bookingId}`); // ✅ Use bookingId
+  } catch (err) {
+    alert("Booking failed!");
+  } finally {
+    setIsBooking(false);
+  }
+};
 
   return (
     <div className="min-h-screen bg-[var(--color-bg)]">

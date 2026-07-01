@@ -1,12 +1,11 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
 import { useRouter, useParams } from "next/navigation";
 import Link from "next/link";
 import { getSupabaseBrowserClient } from "@/lib/supabase/browser-client";
 import { User } from "@supabase/supabase-js";
 import { Zap, Clock, CheckCircle2, ArrowLeft, BatteryCharging, CreditCard, Shield, XCircle, Timer } from "lucide-react";
-import { useBookingActions } from "./useBookingActions";
 
 const S: Record<string, React.CSSProperties> = {
   page: {
@@ -18,7 +17,10 @@ const S: Record<string, React.CSSProperties> = {
   container: {
     maxWidth: "900px",
     margin: "0 auto",
-    padding: "24px",
+    paddingTop: "24px",
+    paddingBottom: "24px",
+    paddingLeft: "24px",
+    paddingRight: "24px",
   },
   card: {
     background: "white",
@@ -98,6 +100,28 @@ export default function BookingDetailPage() {
 
   const supabase = getSupabaseBrowserClient();
 
+  const fetchBookingDetails = useCallback(async () => {
+    setLoading(true);
+    try {
+      const res = await fetch(`/api/bookings/${id}`);
+      const data = await res.json();
+      if (!res.ok) {
+        setError(data.error || "Booking not found.");
+        setBooking(null);
+      } else {
+        setBooking(data.booking);
+        setPaymentSuccess(!!data.booking?.isPaid);
+        setError("");
+      }
+    } catch (err) {
+      console.error(err);
+      setError("Network error. Could not retrieve booking details.");
+      setBooking(null);
+    } finally {
+      setLoading(false);
+    }
+  }, [id]);
+
   useEffect(() => {
     async function checkAuth() {
       const { data: { user } } = await supabase.auth.getUser();
@@ -112,8 +136,9 @@ export default function BookingDetailPage() {
 
     return () => {
       if (holdTimerRef.current) clearInterval(holdTimerRef.current);
+      if (showCodeTimer.current) clearTimeout(showCodeTimer.current);
     };
-  }, []);
+  }, [fetchBookingDetails]);
 
   // Countdown timer for hold expiry
   useEffect(() => {
@@ -136,26 +161,7 @@ export default function BookingDetailPage() {
     return () => {
       if (holdTimerRef.current) clearInterval(holdTimerRef.current);
     };
-  }, [booking?.holdExpiresAt, booking?.status]);
-
-  async function fetchBookingDetails() {
-    setLoading(true);
-    try {
-      const res = await fetch(`/api/bookings/${id}`);
-      const data = await res.json();
-      if (!res.ok) {
-        setError(data.error || "Booking not found.");
-      } else {
-        setBooking(data.booking);
-        setPaymentSuccess(!!data.booking.isPaid);
-      }
-    } catch (err) {
-      console.error(err);
-      setError("Network error. Could not retrieve booking details.");
-    } finally {
-      setLoading(false);
-    }
-  }
+  }, [booking?.holdExpiresAt, booking?.status, fetchBookingDetails]);
 
   const handleGenerateCode = async () => {
     setActionLoading(true);
@@ -249,9 +255,24 @@ export default function BookingDetailPage() {
     }
   };
 
-const { cancelBooking } = useBookingActions(id);
-
-const handleCancelBooking = () => cancelBooking(setActionLoading, setError);
+  const handleCancelBooking = async () => {
+    if (!confirm("Are you sure you want to cancel this booking?")) return;
+    setActionLoading(true);
+    setError("");
+    try {
+      const res = await fetch(`/api/bookings/${id}/cancel`, { method: "POST" });
+      if (res.ok) {
+        router.push("/");
+      } else {
+        const data = await res.json();
+        setError(data.error || "Failed to cancel booking.");
+      }
+    } catch {
+      setError("Network error. Could not cancel booking.");
+    } finally {
+      setActionLoading(false);
+    }
+  };
 
   const handlePaymentSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -353,7 +374,7 @@ const handleCancelBooking = () => cancelBooking(setActionLoading, setError);
                 <Timer className="w-20 h-20 text-amber-500" />
                 <h4 style={{ fontSize: "1.5rem", fontWeight: 800, color: "#1a1916" }}>Host Approval Pending</h4>
                 <p style={{ fontSize: "13px", color: "#6e6b63", textAlign: "center" }}>
-                  The host <strong>{booking.host.name}</strong> needs to accept your request within the next {holdTimeLeft !== null && holdTimeLeft > 0 ? `${Math.floor(holdTimeLeft / 60)}:${String(holdTimeLeft % 60).padStart(2, "0")}` : "0:00"} seconds.
+                  The host <strong>{booking.host?.name ?? "Unknown"}</strong> needs to accept your request within the next {holdTimeLeft !== null && holdTimeLeft > 0 ? `${Math.floor(holdTimeLeft / 60)}:${String(holdTimeLeft % 60).padStart(2, "0")}` : "0:00"} seconds.
                 </p>
                 {holdTimeLeft !== null && holdTimeLeft > 0 ? (
                   <div style={{
@@ -399,7 +420,7 @@ const handleCancelBooking = () => cancelBooking(setActionLoading, setError);
           <div>
             <h4 style={{ fontSize: "18px", fontWeight: 800, margin: 0, color: "#1a1916" }}>Generate Arrival Code</h4>
             <p style={{ fontSize: "13px", color: "#6e6b63", marginTop: "6px" }}>
-              Generate a 6-digit OTP and share it with host <strong>{booking.host?.name}</strong> to begin your session.
+              Generate a 6-digit OTP and share it with host <strong>{booking.host?.name ?? "Unknown"}</strong> to begin your session.
             </p>
           </div>
           {showCode && booking.secretCode && (
@@ -535,13 +556,13 @@ const handleCancelBooking = () => cancelBooking(setActionLoading, setError);
                 <h4 style={{ margin: "0 0 12px 0", fontSize: "16px", fontWeight: 800, color: "#1a6b4a" }}>Bill Summary</h4>
                 <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "8px", fontSize: "13px", color: "#1a1916" }}>
                   <div>Energy</div>
-                  <div style={{ textAlign: "right" }}>{booking.energyKwh?.toFixed(2)} kWh</div>
+                  <div style={{ textAlign: "right" }}>{booking.energyKwh?.toFixed(2) ?? "0.00"} kWh</div>
                   <div>Duration</div>
-                  <div style={{ textAlign: "right" }}>{Math.round(booking.durationMinutes)} min</div>
+                  <div style={{ textAlign: "right" }}>{Math.round(booking.durationMinutes ?? 0)} min</div>
                   <div>Rate</div>
-                  <div style={{ textAlign: "right" }}>₹{booking.charger.pricePerKwh}/kWh</div>
+                  <div style={{ textAlign: "right" }}>₹{booking.charger?.pricePerKwh ?? 0}/kWh</div>
                   <div style={{ fontWeight: 700, borderTop: "1px solid #bbf7d0", paddingTop: "8px", marginTop: "4px" }}>Total</div>
-                  <div style={{ textAlign: "right", fontWeight: 700, borderTop: "1px solid #bbf7d0", paddingTop: "8px", marginTop: "4px" }}>₹{booking.cost?.toFixed(2)}</div>
+                  <div style={{ textAlign: "right", fontWeight: 700, borderTop: "1px solid #bbf7d0", paddingTop: "8px", marginTop: "4px" }}>₹{booking.cost?.toFixed(2) ?? "0.00"}</div>
                 </div>
               </div>
 
@@ -574,7 +595,7 @@ const handleCancelBooking = () => cancelBooking(setActionLoading, setError);
                     disabled={actionLoading}
                     style={{ ...S.btn, background: "linear-gradient(135deg, #1a6b4a, #22914f)", color: "white", opacity: actionLoading ? 0.7 : 1 }}
                   >
-                    <CreditCard className="w-4 h-4" /> Pay ₹{booking.cost?.toFixed(2)} via UPI
+                    <CreditCard className="w-4 h-4" /> Pay ₹{booking.cost?.toFixed(2) ?? "0.00"} via UPI
                   </button>
                 </form>
               )}

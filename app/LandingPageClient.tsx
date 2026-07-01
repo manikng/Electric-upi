@@ -219,7 +219,9 @@ export default function LandingPageClient({ initialUser = null }: LandingPagePro
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Booking failed");
-      router.push(`/booking/${data.id}`);
+      // alarm
+      // router.push(`/booking/${data.id}`);
+      router.push(`/booking/${data.bookingId}`);
     } catch (err: any) {
       setBookingError(err.message || "Something went wrong");
     } finally {
@@ -354,7 +356,7 @@ export default function LandingPageClient({ initialUser = null }: LandingPagePro
               <div className="carousel-progress-bar"><div className="carousel-progress-fill" style={{ width: `${((currentSlide + 1) / HERO_SLIDES.length) * 100}%`, backgroundColor: HERO_SLIDES[currentSlide].color }} /></div>
               <div className="carousel-controls">
                 <button className="carousel-arrow prev w-8 h-8 p-1 rounded-full bg-black/30 dark:bg-white/10" onClick={prevSlide} aria-label="Previous slide"><ChevronLeft className="w-4 h-4" /></button>
-                <div className="carousel-dots">{HERO_SLIDES.map((_, index) => <button key={index} className={`carousel-dot ${index === currentSlide ? "active" : ""}`} onClick={() => goToSlide(index)} aria-label={`Go to slide ${index + 1}`} />)}</div>
+                <div className="journey-carousel-dots">{HERO_SLIDES.map((_, index) => <button key={index} className={`carousel-dot ${index === currentSlide ? "active" : ""}`} onClick={() => goToSlide(index)} aria-label={`Go to slide ${index + 1}`} />)}</div>
                 <button className="carousel-arrow next w-8 h-8 p-1 rounded-full bg-black/30 dark:bg-white/10" onClick={nextSlide} aria-label="Next slide"><ChevronRight className="w-4 h-4" /></button>
               </div>
             </div>
@@ -525,7 +527,7 @@ export default function LandingPageClient({ initialUser = null }: LandingPagePro
           <p className="section-subtitle">From finding a charger to completing a session — it takes just 4 steps. No QR codes. No complexity.</p>
         </div>
         <div className="carousel-wrapper fade-in">
-          <div className="carousel-track-outer">
+          <div className="carousel-track-outer ">
             <div className="carousel-track" style={{ transform: `translateX(-${carouselIndex * (100 / visibleSteps)}%)`, transition: "transform 0.5s cubic-bezier(0.16, 1, 0.3, 1)" }} role="list">
               {JOURNEY_STEPS.map((step) => (
                 <div key={step.num} className="journey-step" style={{ flex: `0 0 calc(${100 / visibleSteps}% - var(--space-4))` }} role="listitem">
@@ -540,7 +542,7 @@ export default function LandingPageClient({ initialUser = null }: LandingPagePro
           </div>
           <div className="carousel-nav" aria-label="Carousel navigation">
             <button onClick={slidePrev} className="carousel-btn" disabled={carouselIndex === 0} aria-label="Previous step"><ChevronLeft className="w-5 h-5" /></button>
-            <div className="carousel-dots" id="carouselDots" role="tablist" aria-label="Journey steps">
+            <div className="journey-carousel-dots  " id="carouselDots" role="tablist" aria-label="Journey steps">
               {Array.from({ length: maxCarouselIndex + 1 }).map((_, i) => (
                 <button key={i} className={`carousel-dot ${carouselIndex === i ? "active" : ""}`} role="tab" aria-selected={carouselIndex === i} aria-label={`Go to step ${i + 1}`} onClick={() => setCarouselIndex(i)} />
               ))}
@@ -601,7 +603,7 @@ export default function LandingPageClient({ initialUser = null }: LandingPagePro
             <div className="footer-brand">
               <div className="nav-logo" style={{ marginBottom: "var(--space-4)" }}>
                 <div className="nav-logo-icon"><Zap className="w-5 h-5 text-white fill-white" /></div>
-                <div><div className="nav-logo-text" style={{ color: "#fff" }}>Electric UPI</div><div className="nav-logo-sub">India's P2P EV Network</div></div>
+                <div><div className="nav-logo-text" >Electric UPI</div><div className="nav-logo-sub">India's P2P EV Network</div></div>
               </div>
               <p>Empowering local communities to accelerate EV adoption with decentralized home charging networks across India.</p>
             </div>
@@ -619,7 +621,7 @@ export default function LandingPageClient({ initialUser = null }: LandingPagePro
             </div>
           </div>
           <div className="footer-bottom">
-            <div className="footer-copy">© 2025 Electric UPI. All rights reserved. Made with ⚡ in India.</div>
+            <div className="footer-copy">© 2026 Electric UPI. All rights reserved. Made with ⚡ in India.</div>
             <div style={{ display: "flex", gap: "var(--space-4)", flexWrap: "wrap" }}>
               <a href="#" style={{ color: "oklch(from white l c h / .45)", fontSize: "var(--text-xs)", textDecoration: "none" }}>Privacy Policy</a>
               <a href="#" style={{ color: "oklch(from white l c h / .45)", fontSize: "var(--text-xs)", textDecoration: "none" }}>Terms of Service</a>

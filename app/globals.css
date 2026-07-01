@@ -83,7 +83,13 @@
   --shadow-md: 0 4px 16px oklch(0 0 0/.35);
   --shadow-lg: 0 16px 40px oklch(0 0 0/.45);
 }
+.nav-logo-text {
+  color: var(--color-text);
+}
 
+.nav-logo-sub {
+  color: var(--color-text-muted);
+}
 /* ─── BASE ─── */
 html {
   scroll-behavior: smooth;
@@ -833,12 +839,18 @@ a, button, [role="button"], input, select {
   color: var(--color-accent);
 }
 
-.carousel-nav {
-  display: flex;
-  gap: var(--space-3);
-  margin-top: var(--space-6);
-  justify-content: center;
-  align-items: center;
+.carousel-nav{
+    display:flex;
+    justify-content:center;
+    align-items:center;
+    gap:24px;
+
+    margin-top:24px;
+}
+
+.journey-carousel-dots{
+    display:flex;
+    gap:10px;
 }
 
 .carousel-btn {
@@ -878,6 +890,30 @@ a, button, [role="button"], input, select {
   background: var(--color-primary);
   width: 24px;
 }
+
+
+.journey-carousel-dots{
+    display:flex;
+    gap:var(--space-2);
+}
+
+.journey-carousel-dot{
+    width:8px;
+    height:8px;
+    border-radius:999px;
+    background:var(--color-border);
+    transition:all .2s;
+}
+
+.journey-carousel-dot.active{
+    width:24px;
+    background:var(--color-primary);
+}
+.journey-step{
+    flex:0 0 33.333%;
+    margin-top:var(--space-6);
+}
+
 
 /* ─── SEARCH + FILTERS ─── */
 .listings-section {
@@ -1380,12 +1416,12 @@ a, button, [role="button"], input, select {
   margin-left: auto;
   color: var(--color-accent);
 }
-
-/* ─── FOOTER ─── */
+/* ─── FOOTER FIXED ─── */
 footer {
-  background: var(--color-text);
+  background: var(--color-text); /* Dark background in light mode, cream/inverse text layout handles contrast */
   color: var(--color-text-inverse);
   padding: var(--space-12) var(--space-6) var(--space-8);
+  width: 100%;
 }
 
 .footer-inner {
@@ -1398,15 +1434,24 @@ footer {
   grid-template-columns: 2fr 1fr 1fr 1fr;
   gap: var(--space-8);
   padding-bottom: var(--space-10);
-  border-bottom: 1px solid oklch(1 0 0 / .1);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1); /* Explicit standard alpha border fallback */
   margin-bottom: var(--space-8);
+}
+
+/* Force Light mode inside dark background elements override labels styling */
+footer .nav-logo-text {
+  color: var(--color-text-inverse) !important;
+}
+
+footer .nav-logo-sub {
+  color: var(--color-text-faint) !important;
 }
 
 .footer-brand p {
   font-size: var(--text-sm);
-  color: oklch(from var(--color-text-inverse) l c h / .6);
+  color: var(--color-text-faint); /* Safe semantic text color fallback instead of native dynamic relative transparency */
   margin-top: var(--space-3);
-  max-width: 30ch;
+  max-width: 32ch;
   line-height: 1.7;
 }
 
@@ -1419,13 +1464,15 @@ footer {
 
 .footer-col ul {
   list-style: none;
+  padding: 0;
+  margin: 0;
   display: flex;
   flex-direction: column;
   gap: var(--space-2);
 }
 
 .footer-col ul li a {
-  color: oklch(from var(--color-text-inverse) l c h / .6);
+  color: var(--color-text-faint);
   text-decoration: none;
   font-size: var(--text-sm);
   transition: color var(--transition);
@@ -1445,15 +1492,31 @@ footer {
 
 .footer-copy {
   font-size: var(--text-xs);
-  color: oklch(from var(--color-text-inverse) l c h / .45);
+  color: var(--color-text-faint);
 }
 
-.footer-made {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-  font-size: var(--text-xs);
-  color: oklch(from var(--color-text-inverse) l c h / .45);
+/* 📱 Responsive Grid Overrides for iPad Pro (1024px) & Mobile viewports */
+@media (max-width: 1024px) {
+  .footer-top {
+    grid-template-columns: 1fr 1fr;
+    gap: var(--space-10);
+  }
+  .footer-brand {
+    grid-column: span 2;
+  }
+}
+
+@media (max-width: 640px) {
+  .footer-top {
+    grid-template-columns: 1fr;
+  }
+  .footer-brand {
+    grid-column: span 1;
+  }
+  .footer-bottom {
+    flex-direction: column;
+    align-items: flex-start;
+  }
 }
 
 /* ─── REUSABLE UI COMPONENTS ─── */

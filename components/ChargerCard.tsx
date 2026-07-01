@@ -1,22 +1,22 @@
 "use client";
 
-import Link from "next/link";
-import { MapPin, ChevronRight } from "lucide-react";
+import { MapPin } from "lucide-react";
 import { ChargerResult } from "@/lib/types";
 import Image from "next/image";
 
+// interface ChargerCardProps {
+//   charger: ChargerResult;
+//   bookingLoaderId: string;
+//   onRequestBooking: (id: string) => void;
+//   onClick?: () => void;
+// }
+
 interface ChargerCardProps {
   charger: ChargerResult;
-  bookingLoaderId: string;
-  onRequestBooking: (id: string) => void;
-  onClick?: () => void;
 }
 
 export default function ChargerCard({
   charger,
-  bookingLoaderId,
-  onRequestBooking,
-  onClick,
 }: ChargerCardProps) {
   const distanceText =
     charger.distanceKm !== null && charger.distanceKm !== undefined
@@ -34,34 +34,22 @@ export default function ChargerCard({
   const placeholderImageUrl = "/placeholder-ev-station.svg";
 
   return (
-    <Link
-      href={`/host/chargers/${charger.id}`}
+
+    <article
+      className="listing-card"
+      role="listitem"
       style={{
-        textDecoration: "none",
-        color: "inherit",
-      }}
-      onClick={(event) => {
-        if (onClick) {
-          event.preventDefault();
-          onClick();
-        }
+        background: "var(--color-surface-2)",
+        border: "1.5px solid var(--color-border)",
+        borderRadius: "16px",
+        overflow: "hidden",
+        display: "flex",
+        flexDirection: "column",
+        position: "relative",
+        transition: "transform 0.2s ease, box-shadow 0.2s ease",
+        cursor: "pointer",
       }}
     >
-      <article
-        className="listing-card"
-        role="listitem"
-        style={{
-          background: "var(--color-surface-2)",
-          border: "1.5px solid var(--color-border)",
-          borderRadius: "16px",
-          overflow: "hidden",
-          display: "flex",
-          flexDirection: "column",
-          position: "relative",
-          transition: "transform 0.2s ease, box-shadow 0.2s ease",
-          cursor: "pointer",
-        }}
-      >
       {/* Image Section */}
       <div
         style={{
@@ -203,66 +191,29 @@ export default function ChargerCard({
             marginTop: "auto",
             paddingTop: "12px",
             borderTop: "1px solid var(--color-border)",
-            display: "flex",
-            justifyContent: "space-between",
-            alignItems: "center",
           }}
         >
-          <div>
-            <div style={{ fontSize: "16px", fontWeight: 800, color: "var(--color-text)" }}>
-              ₹{Number(charger.pricePerKwh ?? 0).toFixed(2)}
-              <span
-                style={{
-                  fontSize: "11px",
-                  fontWeight: 500,
-                  color: "var(--color-text-muted)",
-                }}
-              >
-                /kWh
-              </span>
-            </div>
-          </div>
-
-          <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                onRequestBooking(charger.id);
-              }}
-              disabled={bookingLoaderId !== ""}
+          <div
+            style={{
+              fontSize: "16px",
+              fontWeight: 800,
+              color: "var(--color-text)",
+            }}
+          >
+            ₹{Number(charger.pricePerKwh ?? 0).toFixed(2)}
+            <span
               style={{
-                background: "linear-gradient(135deg, #1a6b4a, #22914f)",
-                color: "white",
-                border: "none",
-                padding: "8px 16px",
-                borderRadius: "8px",
-                fontSize: "13px",
-                fontWeight: 700,
-                cursor: bookingLoaderId !== "" ? "not-allowed" : "pointer",
-                boxShadow: "0 4px 12px rgba(26,107,74,0.15)",
-                transition: "opacity 0.2s",
-              }}
-            >
-              {bookingLoaderId === charger.id ? "Booking..." : "Book Now"}
-            </button>
-            <div
-              style={{
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                width: "32px",
-                height: "32px",
-                borderRadius: "50%",
-                background: "var(--color-surface-offset)",
+                fontSize: "11px",
+                fontWeight: 500,
                 color: "var(--color-text-muted)",
               }}
             >
-              <ChevronRight className="w-4 h-4" />
-            </div>
+              /kWh
+            </span>
           </div>
         </div>
       </div>
     </article>
-  </Link>
-);
+
+  );
 }
