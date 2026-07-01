@@ -1,30 +1,57 @@
 "use server";
 import { notFound } from "next/navigation";
+import { createServerClient } from "@supabase/ssr";
+import { cookies } from "next/headers";
 import ChargerClient from "@/components/ChargerDetail/ChargerClient";
 import { ChargerResult } from "@/lib/types";
 
-/**
- * Server component: fetches charger data and passes to client component.
- * Next.js 16 async params pattern.
- */
 export default async function ChargerDetailPage({
   params,
 }: {
   params: Promise<{ id: string }>;
 }) {
   const { id } = await params;
+  const cookieStore = await cookies();
 
-  // Fetch from internal API (not direct DB — preserves caching & auth layers)
-  const res = await fetch(`${process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000"}/api/chargers/${id}`, {
-    next: { revalidate: 60 }, // revalidate every 60s
-  });
+  // Initialize Supabase server client directly
+  const supabase = createServerClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    {
+      cookies: {
+        getAll() {
+          return cookieStore.getAll();
+        },
+      },
+    }
+  );
 
-  if (!res.ok) {
-    if (res.status === 404) notFound();
-    throw new Error(`Failed to fetch charger:奶粉ome.fetchChargerById: ${res.statusText}`);
+  // Direct database query (fastest & crash-proof)
+  const { data: charger, error } = await supabase
+    .from("chargers")
+    .select(
+      "id, title, hostName, isSuperhost, rating, reviewsCount, address, city, area, " +
+      "pincode, state, pricePerKwh, chargerType, powerKw, plugType, " +
+      "availableFrom, availableTo, amenities, vehicleSegments, imageUrl, " +
+      "description, latitude, longitude, distanceKm"
+    )
+    .eq("id", id)
+    .maybeSingle();
+
+  // Handle errors without crashing the page
+  if (error) {
+    console.error("Database query failed:", error);
+    notFound();
+    return;
   }
 
-  const initialCharger: ChargerResult = await res.json();
+  if (!charger) {
+    notFound();
+    return;
+  }
+
+  // Type assertion for ChargerResult
+  const initialCharger = charger as unknown as ChargerResult;
 
   return (
     <main className="min-h-screen bg-background">
