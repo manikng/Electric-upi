@@ -13,7 +13,16 @@ export function useAuth({ initialUser }: UseAuthOptions) {
   const supabase = getSupabaseBrowserClient();
   const [user, setUser] = useState<User | null>(initialUser);
 
-  // Listen to auth state changes
+  // Recover session immediately on mount (fixes Vercel stale-auth issue)
+  useEffect(() => {
+    if (initialUser) return; // Server already provided user — skip
+
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      if (session?.user) setUser(session.user);
+    });
+  }, [initialUser, supabase]);
+
+  // Listen to auth state changes (login/logout events after mount)
   useEffect(() => {
     const { data: listener } = supabase.auth.onAuthStateChange(
       (_event, session) => {
