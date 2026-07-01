@@ -1,0 +1,177 @@
+
+github repo : "https://github.com/Kshiti-24/Realtime-Location-Tracker/blob/main/public/javascripts/script.js"
+
+```
+const socket = io();
+
+let currentLocation = null;
+
+if (navigator.geolocation) {
+  navigator.geolocation.watchPosition(
+    (position) => {
+      const { latitude, longitude } = position.coords;
+      currentLocation = { latitude, longitude };
+      console.log(`Sending location: ${latitude}, ${longitude}`);
+      socket.emit("send-location", { latitude, longitude });
+    },
+    (error) => {
+      console.log(error);
+    },
+    {
+      enableHighAccuracy: true,
+      timeout: 5000,
+      maximumAge: 0,
+    }
+  );
+}
+
+const map = L.map("map").setView([0, 0], 16);
+
+L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+  attribution: "Realtime Location Tracker by Kshitiz",
+}).addTo(map);
+
+const markers = {};
+const markerClusterGroup = L.markerClusterGroup();
+map.addLayer(markerClusterGroup);
+
+const addOffset = (latitude, longitude) => {
+  const offset = 0.00001;
+  const randomOffsetLat = (Math.random() - 0.5) * offset;
+  const randomOffsetLng = (Math.random() - 0.5) * offset;
+  return [latitude + randomOffsetLat, longitude + randomOffsetLng];
+};
+
+const calculateDistance = (lat1, lon1, lat2, lon2) => {
+  const R = 6371e3;
+  const φ1 = (lat1 * Math.PI) / 180;
+  const φ2 = (lat2 * Math.PI) / 180;
+  const Δφ = ((lat2 - lat1) * Math.PI) / 180;
+  const Δλ = ((lon2 - lon1) * Math.PI) / 180;
+
+  const a =
+    Math.sin(Δφ / 2) * Math.sin(Δφ / 2) +
+    Math.cos(φ1) * Math.cos(φ2) * Math.sin(Δλ / 2) * Math.sin(Δλ / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+
+  const distance = R * c;
+  return distance;
+};
+
+const updateLocationList = (id, latitude, longitude, distance = null) => {
+  const locationList = document.getElementById("location-list");
+  let locationItem = document.getElementById(`location-${id}`);
+  if (!locationItem) {
+    locationItem = document.createElement("li");
+    locationItem.id = `location-${id}`;
+    locationList.appendChild(locationItem);
+  }
+  locationItem.textContent = `ID: ${id}, Latitude: ${latitude}, Longitude: ${longitude}${
+    distance !== null ? `, Distance: ${distance.toFixed(2)} meters` : ""
+  }`;
+};
+
+socket.on("receive-location", (data) => {
+  const { id, latitude, longitude } = data;
+  console.log(`Received location for ${id}: ${latitude}, ${longitude}`);
+  map.setView([latitude, longitude]);
+  const [newLat, newLng] = addOffset(latitude, longitude);
+  if (markers[id]) {
+    markers[id].setLatLng([newLat, newLng]);
+  } else {
+    markers[id] = L.marker([newLat, newLng]).addTo(markerClusterGroup);
+  }
+  updateLocationList(id, latitude, longitude);
+});
+
+socket.on("user-disconnected", (id) => {
+  console.log(`User disconnected: ${id}`);
+  if (markers[id]) {
+    markerClusterGroup.removeLayer(markers[id]);
+    delete markers[id];
+  }
+  const locationItem = document.getElementById(`location-${id}`);
+  if (locationItem) {
+    locationItem.remove();
+  }
+});
+
+let manualMarker = null;
+
+map.on("click", (e) => {
+  const { lat, lng } = e.latlng;
+  const userConfirmed = window.confirm(
+    `Do you want to add a marker at Latitude: ${lat}, Longitude: ${lng}?`
+  );
+  if (userConfirmed) {
+    if (manualMarker) {
+      map.removeLayer(manualMarker);
+    }
+    manualMarker = L.marker([lat, lng]).addTo(map);
+    const distance = currentLocation
+      ? calculateDistance(
+          currentLocation.latitude,
+          currentLocation.longitude,
+          lat,
+          lng
+        )
+      : null;
+    updateLocationList("manual", lat, lng, distance);
+  }
+});
+
+```
+app.js
+```
+const express = require("express");
+const app = express();
+const http = require("http");
+const socketio = require("socket.io");
+const path = require("path");
+const server = http.createServer(app);
+const io = socketio(server);
+
+app.set("view engine", "ejs");
+app.use(express.static(path.join(__dirname, "public")));
+
+io.on("connection", function (socket) {
+  console.log(`User connected: ${socket.id}`);
+  socket.on("send-location", function (data) {
+    console.log(
+      `Location received from ${socket.id}: ${data.latitude}, ${data.longitude}`
+    );
+    io.emit("receive-location", { id: socket.id, ...data });
+  });
+
+  socket.on("disconnect", function () {
+    console.log(`User disconnected: ${socket.id}`);
+    io.emit("user-disconnected", socket.id);
+  });
+});
+
+app.get("/", function (req, res) {
+  res.render("index");
+});
+
+server.listen(3000, () => {
+  console.log("Server is running on port 3000");
+});
+```
+it works for 
+```
+  "name": "location-tracker",
+  "version": "1.0.0",
+  "lockfileVersion": 3,
+  "requires": true,
+  "packages": {
+    "": {
+      "name": "location-tracker",
+      "version": "1.0.0",
+      "license": "ISC",
+      "dependencies": {
+        "ejs": "^3.1.10",
+        "express": "^4.19.2",
+        "node": "^18.20.4",
+        "socket.io": "^4.7.5"
+      }
+```
