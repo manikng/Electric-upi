@@ -9,9 +9,13 @@
 !.yarn/plugins
 !.yarn/releases
 !.yarn/versions
+/supabase-backend-info/
 /agent-project-readme/
 # testing
 /coverage
+/MAPFUNCTIONALITY/
+/Learnings/
+
 # next.js
 /.next/
 /out/
@@ -45,4 +49,3 @@ yarn-error.log*
 next-env.d.ts
 
 #some text and md files
-!README.md
